@@ -91,6 +91,9 @@ fn candidates_to_scored_posts(candidates: &[PostCandidate]) -> Vec<ScoredPost> {
                 last_scored_timestamp_ms: candidate.last_scored_at_ms.unwrap_or(0),
                 prediction_request_id: candidate.prediction_request_id.unwrap_or(0),
                 ancestors: candidate.ancestors.clone(),
+                tombstone_ancestor_ids: candidate.tombstone_ancestor_ids.clone(),
+                ancestor_users: candidate.ancestor_users.clone(),
+                quoted_user_id: candidate.quoted_user_id.unwrap_or(0),
                 screen_names,
                 visibility_reason: candidate.visibility_reason.clone().map(|r| r.into()),
                 tweet_type_metrics: Bytes::from(
@@ -107,6 +110,13 @@ fn candidates_to_scored_posts(candidates: &[PostCandidate]) -> Vec<ScoredPost> {
                     .filter_map(|l| safety_label_to_proto(l.label_type))
                     .collect(),
                 tweet_text: candidate.tweet_text.clone(),
+                predicted_dwell_sec: candidate
+                    .phoenix_scores
+                    .dwell_time
+                    .filter(|d| d.is_finite() && *d > 0.0)
+                    .map(|d| d as f32),
+                topic_feedback_topic: candidate.topic_feedback_topic.clone(),
+                topic_feedback_topic_id: candidate.topic_feedback_topic_id.clone(),
             }
         })
         .collect()
@@ -209,6 +219,7 @@ fn safety_label_to_proto(label: SafetyLabelType) -> Option<i32> {
         SafetyLabelType::GROK_NSFA_LIMITED => HM::GrokNsfaLimited,
         SafetyLabelType::NSFA_HIGH_RECALL => HM::NsfaHighRecall,
         SafetyLabelType::GROK_SFA => HM::GrokSfa,
+        SafetyLabelType::MALICIOUS_URL => HM::MaliciousUrl,
         _ => return None,
     };
     Some(v.into())

@@ -1,8 +1,8 @@
-use crate::clients::user_demographics_client::UserDemographicsClient;
 use crate::models::query::ScoredPostsQuery;
 use crate::params::EnableContextFeatures;
 use std::sync::Arc;
 use tonic::async_trait;
+use xai_candidate_pipeline::component_library::clients::user_demographics_client::UserDemographicsClient;
 use xai_candidate_pipeline::query_hydrator::QueryHydrator;
 
 pub struct UserDemographicsQueryHydrator {

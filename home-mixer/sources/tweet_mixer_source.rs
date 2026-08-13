@@ -1,17 +1,20 @@
 use crate::models::candidate::PostCandidate;
 use crate::models::query::ScoredPostsQuery;
-use crate::params::{MAX_POST_AGE, TweetMixerMaxResults};
+use crate::params::{EnableTweetMixerSource, TweetMixerMaxResults};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 use tonic::async_trait;
 use xai_candidate_pipeline::component_library::clients::tweet_mixer_client::TweetMixerClient;
 use xai_candidate_pipeline::component_library::utils::duration_since_creation_opt;
+use xai_candidate_pipeline::component_library::utils::quality_factor;
 use xai_candidate_pipeline::source::Source;
 use xai_home_mixer_proto as pb;
 use xai_x_thrift::tweet_mixer::{
     ClientContext, HomeRecommendedTweetsProductContext, Product, ProductContext, TweetMixerRequest,
 };
+
+const MAX_POST_AGE: Duration = Duration::from_secs(48 * 60 * 60);
 
 pub struct TweetMixerSource {
     pub tweet_mixer_client: Arc<dyn TweetMixerClient>,
@@ -20,7 +23,9 @@ pub struct TweetMixerSource {
 #[async_trait]
 impl Source<ScoredPostsQuery, PostCandidate> for TweetMixerSource {
     fn enable(&self, query: &ScoredPostsQuery) -> bool {
-        !query.in_network_only && !query.has_cached_posts
+        query.params.get(EnableTweetMixerSource)
+            && !query.in_network_only
+            && !query.has_cached_posts
     }
 
     async fn source(&self, query: &ScoredPostsQuery) -> Result<Vec<PostCandidate>, String> {
@@ -58,7 +63,7 @@ impl Source<ScoredPostsQuery, PostCandidate> for TweetMixerSource {
                 ),
             )),
             cursor: None,
-            max_results: Some(query.params.get(TweetMixerMaxResults)),
+            max_results: Some(quality_factor::apply(query.params.get(TweetMixerMaxResults)) as i32),
         };
 
         let candidates = self
@@ -73,7 +78,7 @@ impl Source<ScoredPostsQuery, PostCandidate> for TweetMixerSource {
                 let tweet_id = candidate.tweet_id as u64;
 
                 let within_age = duration_since_creation_opt(tweet_id)
-                    .map(|age| age <= Duration::from_secs(MAX_POST_AGE))
+                    .map(|age| age <= MAX_POST_AGE)
                     .unwrap_or(false);
                 if !within_age {
                     return None;
@@ -99,5 +104,35 @@ impl Source<ScoredPostsQuery, PostCandidate> for TweetMixerSource {
             .collect();
 
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use xai_candidate_pipeline::component_library::clients::tweet_mixer_client::MockTweetMixerClient;
+
+    fn source() -> TweetMixerSource {
+        TweetMixerSource {
+            tweet_mixer_client: Arc::new(MockTweetMixerClient),
+        }
+    }
+
+    #[test]
+    fn enable_returns_false_when_in_network_only() {
+        let query = ScoredPostsQuery {
+            in_network_only: true,
+            ..Default::default()
+        };
+        assert!(!source().enable(&query));
+    }
+
+    #[test]
+    fn enable_returns_false_when_has_cached_posts() {
+        let query = ScoredPostsQuery {
+            has_cached_posts: true,
+            ..Default::default()
+        };
+        assert!(!source().enable(&query));
     }
 }

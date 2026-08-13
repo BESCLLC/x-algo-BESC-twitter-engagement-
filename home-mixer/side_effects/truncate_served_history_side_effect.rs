@@ -1,8 +1,9 @@
-use crate::clients::served_history_client::{ServedHistoryClient, TimelineType, client_platform};
+use crate::clients::served_history_client::{ServedHistoryClient, TimelineType};
 use crate::models::query::ScoredPostsQuery;
 use crate::params::EnableUrtMigrationComponents;
 use std::sync::Arc;
 use tonic::async_trait;
+use xai_candidate_pipeline::component_library::utils::client_utils::app_id_to_served_history_id;
 use xai_candidate_pipeline::component_library::utils::is_prod;
 use xai_candidate_pipeline::side_effect::{SideEffect, SideEffectInput};
 use xai_home_mixer_proto::FeedItem;
@@ -44,9 +45,14 @@ impl SideEffect<ScoredPostsQuery, FeedItem> for TruncateServedHistorySideEffect 
             return Ok(());
         }
 
-        let platform = client_platform::from_client_app_id(query.client_app_id);
+        let platform = app_id_to_served_history_id(query.client_app_id);
         self.client
-            .delete(query.user_id, TimelineType::Home, platform, &to_delete)
+            .delete(
+                query.user_id,
+                TimelineType::for_request(query.request_type),
+                platform,
+                &to_delete,
+            )
             .await
             .map_err(|e| e.to_string())
     }

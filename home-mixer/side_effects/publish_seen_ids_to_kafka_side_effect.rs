@@ -1,11 +1,11 @@
-use crate::clients::kafka_publisher_client::{
-    CLIENT_SENT_IMPRESSIONS_TOPIC, KafkaCluster, KafkaPublisherClient, ProdKafkaPublisherClient,
-};
 use crate::models::query::ScoredPostsQuery;
 use crate::params::EnablePublishSeenIdsToKafka;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use tonic::async_trait;
+use xai_candidate_pipeline::component_library::clients::kafka_publisher_client::{
+    KafkaCluster, KafkaPublisherClient, ProdKafkaPublisherClient, CLIENT_SENT_IMPRESSIONS_TOPIC,
+};
 use xai_candidate_pipeline::component_library::utils::is_prod;
 use xai_candidate_pipeline::side_effect::{SideEffect, SideEffectInput};
 use xai_home_mixer_proto::FeedItem;

@@ -5,7 +5,7 @@ use tonic::async_trait;
 use tracing::warn;
 use xai_candidate_pipeline::component_library::clients::ReplyMixerClient;
 use xai_candidate_pipeline::source::Source;
-use xai_home_mixer_proto::{FeedItem, PushToHomePost, ServedType, feed_item};
+use xai_home_mixer_proto::{feed_item, FeedItem, PushToHomePost, ServedType};
 
 const MAX_REPLIERS: usize = 3;
 
@@ -92,6 +92,106 @@ impl PushToHomeSource {
                 warn!(error = %e, "PushToHomeSource: reply-mixer failed, skipping repliers");
                 vec![]
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::clients::tweet_entity_service_client::MockTESClient;
+    use xai_candidate_pipeline::component_library::clients::MockReplyMixerClient;
+    use xai_candidate_pipeline::source::Source;
+    use xai_core_entities::entities::PureCoreData;
+
+    fn make_source(mock: MockTESClient) -> PushToHomeSource {
+        PushToHomeSource {
+            tes_client: Arc::new(mock),
+            reply_mixer_client: Arc::new(MockReplyMixerClient),
+        }
+    }
+
+    #[test]
+    fn enable_returns_false_when_no_push_to_home() {
+        let source = make_source(MockTESClient::default());
+        let query = ScoredPostsQuery::default();
+        assert!(!source.enable(&query));
+    }
+
+    #[test]
+    fn enable_returns_true_when_push_to_home_set() {
+        let source = make_source(MockTESClient::default());
+        let query = ScoredPostsQuery {
+            push_to_home_post_id: Some(123),
+            ..Default::default()
+        };
+        assert!(source.enable(&query));
+    }
+
+    #[tokio::test]
+    async fn returns_empty_when_tweet_not_found() {
+        let source = make_source(MockTESClient::default());
+        let query = ScoredPostsQuery {
+            push_to_home_post_id: Some(999),
+            ..Default::default()
+        };
+        let result = source.source(&query).await.unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn returns_focal_tweet_when_found() {
+        let mut mock = MockTESClient::default();
+        mock.core_data.insert(
+            42,
+            Some(PureCoreData {
+                author_id: 100,
+                text: "hello".into(),
+                in_reply_to_tweet_id: None,
+                ..Default::default()
+            }),
+        );
+        let source = make_source(mock);
+        let query = ScoredPostsQuery {
+            push_to_home_post_id: Some(42),
+            ..Default::default()
+        };
+        let result = source.source(&query).await.unwrap();
+        assert_eq!(result.len(), 1);
+        match &result[0].item {
+            Some(feed_item::Item::PushToHome(post)) => {
+                assert_eq!(post.tweet_id, 42);
+                assert_eq!(post.author_id, 100);
+            }
+            _ => panic!("expected PushToHome item"),
+        }
+    }
+
+    #[tokio::test]
+    async fn sets_conversation_fields_for_reply() {
+        let mut mock = MockTESClient::default();
+        mock.core_data.insert(
+            42,
+            Some(PureCoreData {
+                author_id: 100,
+                text: "reply".into(),
+                in_reply_to_tweet_id: Some(20),
+                conversation_id: Some(10),
+                ..Default::default()
+            }),
+        );
+        let source = make_source(mock);
+        let query = ScoredPostsQuery {
+            push_to_home_post_id: Some(42),
+            ..Default::default()
+        };
+        let result = source.source(&query).await.unwrap();
+        match &result[0].item {
+            Some(feed_item::Item::PushToHome(post)) => {
+                assert_eq!(post.in_reply_to_tweet_id, 20);
+                assert_eq!(post.conversation_id, 10);
+            }
+            _ => panic!("expected PushToHome item"),
         }
     }
 }

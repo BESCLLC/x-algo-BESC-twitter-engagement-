@@ -1,12 +1,12 @@
-use crate::clients::served_history_client::client_platform;
 use crate::clients::served_history_client::{ServedHistoryClient, TimelineType};
 use crate::models::query::ScoredPostsQuery;
 use crate::params::{
     EnableUrtMigrationComponents, ExcludeServedTweetIdsDuration, ExcludeServedTweetIdsNumber,
-    WhoToFollowFatigueHours,
+    FeedSurveyFatigueHours, WhoToFollowFatigueHours,
 };
 use std::sync::Arc;
 use tonic::async_trait;
+use xai_candidate_pipeline::component_library::utils::client_utils::app_id_to_served_history_id;
 use xai_candidate_pipeline::query_hydrator::QueryHydrator;
 use xai_x_thrift::served_history::{EntityIdType, ServedHistory};
 
@@ -27,10 +27,11 @@ impl QueryHydrator<ScoredPostsQuery> for ServedHistoryQueryHydrator {
     }
 
     async fn hydrate(&self, query: &ScoredPostsQuery) -> Result<ScoredPostsQuery, String> {
-        let platform = client_platform::from_client_app_id(query.client_app_id);
+        let platform = app_id_to_served_history_id(query.client_app_id);
+        let timeline_type = TimelineType::for_request(query.request_type);
         let entries = self
             .client
-            .get_recent(query.user_id, TimelineType::Home, platform)
+            .get_recent(query.user_id, timeline_type, platform)
             .await
             .map_err(|e| e.to_string())?;
 
@@ -38,6 +39,13 @@ impl QueryHydrator<ScoredPostsQuery> for ServedHistoryQueryHydrator {
             &entries,
             EntityIdType::WHO_TO_FOLLOW,
             query.params.get(WhoToFollowFatigueHours),
+            query.request_time_ms,
+        );
+
+        let feed_survey_eligible = is_module_eligible(
+            &entries,
+            EntityIdType::ANNOTATION,
+            query.params.get(FeedSurveyFatigueHours),
             query.request_time_ms,
         );
 
@@ -52,6 +60,7 @@ impl QueryHydrator<ScoredPostsQuery> for ServedHistoryQueryHydrator {
             served_history: entries,
             served_ids,
             who_to_follow_eligible,
+            feed_survey_eligible,
             ..Default::default()
         })
     }
@@ -60,6 +69,7 @@ impl QueryHydrator<ScoredPostsQuery> for ServedHistoryQueryHydrator {
         query.served_history = hydrated.served_history;
         query.served_ids = hydrated.served_ids;
         query.who_to_follow_eligible = hydrated.who_to_follow_eligible;
+        query.feed_survey_eligible = hydrated.feed_survey_eligible;
     }
 }
 

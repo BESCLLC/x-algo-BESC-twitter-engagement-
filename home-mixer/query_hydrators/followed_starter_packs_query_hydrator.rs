@@ -1,12 +1,12 @@
-use crate::clients::followed_starter_packs_store_client::FollowedStarterPacksStoreClient;
 use crate::models::query::ScoredPostsQuery;
 use crate::params::EnableContextFeatures;
 use std::sync::Arc;
 use std::time::Duration;
 use tonic::async_trait;
+use xai_candidate_pipeline::component_library::clients::followed_starter_packs_store_client::FollowedStarterPacksStoreClient;
 
 use xai_candidate_pipeline::query_hydrator::QueryHydrator;
-use xai_recsys_proto::starter_packs::{PACK_IDS, ids_to_bool_array};
+use xai_recsys_proto::starter_packs::{ids_to_bool_array, PACK_IDS};
 
 const MH_GET_TIMEOUT: Duration = Duration::from_millis(300);
 pub struct FollowedStarterPacksQueryHydrator {

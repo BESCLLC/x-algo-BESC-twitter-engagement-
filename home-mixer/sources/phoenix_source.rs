@@ -1,20 +1,20 @@
 use crate::models::candidate::PostCandidate;
 use crate::models::query::ScoredPostsQuery;
 use crate::params::{
-    EnableNewUserTopicRetrieval, PhoenixMaxResults, PhoenixRetrievalInferenceClusterId,
-    PhoenixRetrievalNewUserHistoryThreshold, PhoenixRetrievalNewUserInferenceClusterId,
+    EnablePhoenixRetrievalFallback, EnablePhoenixSource, PhoenixMaxResults,
+    PhoenixRetrievalInferenceClusterId, PhoenixRetrievalNewUserHistoryThreshold,
+    PhoenixRetrievalNewUserInferenceClusterId, PhoenixXdsRetrievalMaxRetries,
 };
+use crate::util::egress::RetrievalDispatch;
 use crate::util::phoenix_request::{build_client_context, build_user_context};
-use std::sync::Arc;
 use tonic::async_trait;
-use xai_candidate_pipeline::component_library::clients::phoenix_retrieval_client::{
-    PhoenixRetrievalClient, PhoenixRetrievalCluster,
-};
+use xai_candidate_pipeline::component_library::clients::phoenix_retrieval_client::PhoenixRetrievalCluster;
+use xai_candidate_pipeline::component_library::utils::quality_factor;
 use xai_candidate_pipeline::source::Source;
 use xai_home_mixer_proto as pb;
 
 pub struct PhoenixSource {
-    pub phoenix_retrieval_client: Arc<dyn PhoenixRetrievalClient + Send + Sync>,
+    pub dispatch: RetrievalDispatch,
 }
 
 impl PhoenixSource {
@@ -39,18 +39,17 @@ impl PhoenixSource {
         }
 
         if let Some(decider) = &query.decider {
-            match configured_cluster {
-                PhoenixRetrievalCluster::Experiment1Lap7
-                    if decider.enabled("enable_phoenix_retrieval_lap7_to_fou") =>
-                {
+            let is_prod = matches!(
+                configured_cluster,
+                PhoenixRetrievalCluster::Experiment1Fou | PhoenixRetrievalCluster::Experiment2Fou
+            );
+            if is_prod {
+                if decider.enabled("override_retrieval_use_experiment2_fou") {
+                    return PhoenixRetrievalCluster::Experiment2Fou;
+                }
+                if decider.enabled("override_retrieval_use_experiment1_fou") {
                     return PhoenixRetrievalCluster::Experiment1Fou;
                 }
-                PhoenixRetrievalCluster::Experiment1Fou
-                    if decider.enabled("enable_phoenix_retrieval_fou_to_lap7") =>
-                {
-                    return PhoenixRetrievalCluster::Experiment1Lap7;
-                }
-                _ => {}
             }
         }
 
@@ -61,8 +60,8 @@ impl PhoenixSource {
 #[async_trait]
 impl Source<ScoredPostsQuery, PostCandidate> for PhoenixSource {
     fn enable(&self, query: &ScoredPostsQuery) -> bool {
-        (!query.is_topic_request() || query.is_bulk_topic_request())
-            && (!query.params.get(EnableNewUserTopicRetrieval) || !query.has_new_user_topic_ids())
+        query.params.get(EnablePhoenixSource)
+            && (!query.is_topic_request() || query.is_bulk_topic_request())
             && !query.in_network_only
             && !query.has_cached_posts
     }
@@ -80,20 +79,23 @@ impl Source<ScoredPostsQuery, PostCandidate> for PhoenixSource {
         let user_context = build_user_context(query);
 
         let response = self
-            .phoenix_retrieval_client
-            .retrieve(
+            .dispatch
+            .retrieve_with_fallback(
+                query,
                 cluster,
                 user_id,
                 sequence.clone(),
                 query.columnar_retrieval_sequence.clone(),
-                query.params.get(PhoenixMaxResults),
+                quality_factor::apply(query.params.get(PhoenixMaxResults)),
                 vec![],
                 None,
                 client_context,
                 user_context,
+                query.params.get(PhoenixXdsRetrievalMaxRetries),
+                query.params.get(EnablePhoenixRetrievalFallback),
             )
             .await
-            .map_err(|e| format!("PhoenixSource: {}", e))?;
+            .map_err(|e| format!("PhoenixSource: {e}"))?;
 
         let candidates: Vec<PostCandidate> = response
             .top_k_candidates
@@ -103,7 +105,8 @@ impl Source<ScoredPostsQuery, PostCandidate> for PhoenixSource {
             .map(|tweet_info| PostCandidate {
                 tweet_id: tweet_info.tweet_id,
                 author_id: tweet_info.author_id,
-                in_reply_to_tweet_id: Some(tweet_info.in_reply_to_tweet_id),
+                in_reply_to_tweet_id: (tweet_info.in_reply_to_tweet_id != 0)
+                    .then_some(tweet_info.in_reply_to_tweet_id),
                 retweeted_tweet_id: (tweet_info.retweeted_tweet_id != 0)
                     .then_some(tweet_info.retweeted_tweet_id),
                 served_type: Some(pb::ServedType::ForYouPhoenixRetrieval),
@@ -112,5 +115,39 @@ impl Source<ScoredPostsQuery, PostCandidate> for PhoenixSource {
             .collect();
 
         Ok(candidates)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use xai_candidate_pipeline::component_library::clients::phoenix_retrieval_client::MockRetrievalClient;
+
+    fn source() -> PhoenixSource {
+        PhoenixSource {
+            dispatch: RetrievalDispatch {
+                prod: Arc::new(MockRetrievalClient),
+                paths: vec![],
+            },
+        }
+    }
+
+    #[test]
+    fn enable_returns_false_when_in_network_only() {
+        let query = ScoredPostsQuery {
+            in_network_only: true,
+            ..Default::default()
+        };
+        assert!(!source().enable(&query));
+    }
+
+    #[test]
+    fn enable_returns_false_when_has_cached_posts() {
+        let query = ScoredPostsQuery {
+            has_cached_posts: true,
+            ..Default::default()
+        };
+        assert!(!source().enable(&query));
     }
 }

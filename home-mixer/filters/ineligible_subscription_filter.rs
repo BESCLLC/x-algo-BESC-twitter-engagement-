@@ -3,7 +3,6 @@ use crate::models::query::ScoredPostsQuery;
 use std::collections::HashSet;
 use xai_candidate_pipeline::filter::{Filter, FilterResult};
 
-/// Filters out subscription-only posts from authors the viewer is not subscribed to.
 pub struct IneligibleSubscriptionFilter;
 
 impl Filter<ScoredPostsQuery, PostCandidate> for IneligibleSubscriptionFilter {
@@ -28,5 +27,43 @@ impl Filter<ScoredPostsQuery, PostCandidate> for IneligibleSubscriptionFilter {
                 });
 
         FilterResult { kept, removed }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn candidate(subscription_author_id: Option<u64>) -> PostCandidate {
+        PostCandidate {
+            subscription_author_id,
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn keeps_only_subscribed_authors() {
+        let filter = IneligibleSubscriptionFilter;
+        let mut query = ScoredPostsQuery::default();
+        query.user_features.subscribed_user_ids = vec![1, 2];
+
+        let candidates = vec![candidate(Some(1)), candidate(Some(3)), candidate(None)];
+
+        let result = filter.filter(&query, candidates);
+
+        assert_eq!(result.kept.len(), 2);
+        assert_eq!(result.removed.len(), 1);
+        assert!(result
+            .kept
+            .iter()
+            .any(|c| c.subscription_author_id == Some(1)));
+        assert!(result
+            .kept
+            .iter()
+            .any(|c| c.subscription_author_id.is_none()));
+        assert!(result
+            .removed
+            .iter()
+            .any(|c| c.subscription_author_id == Some(3)));
     }
 }

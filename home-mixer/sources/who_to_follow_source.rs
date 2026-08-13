@@ -1,14 +1,15 @@
 use crate::clients::who_to_follow_client::WhoToFollowClient;
-use crate::models::query::ScoredPostsQuery;
+use crate::models::query::{RequestType, ScoredPostsQuery};
 use crate::params::EnableWhoToFollowModule;
 use std::sync::Arc;
 use tonic::async_trait;
 use xai_account_recommendations_mixer_proto::{
-    AccountRecommendationsMixerRequest, ClientContext, HomeWhoToFollowProductContext, Product,
-    ProductContext, WhoToFollowReactiveContext, product_context,
+    product_context, AccountRecommendationsMixerRequest, ClientContext,
+    HomeReverseChronWhoToFollowProductContext, HomeWhoToFollowProductContext, Product,
+    ProductContext, WhoToFollowReactiveContext,
 };
 use xai_candidate_pipeline::source::Source;
-use xai_home_mixer_proto::{FeedItem, WhoToFollowModule, feed_item};
+use xai_home_mixer_proto::{feed_item, FeedItem, WhoToFollowModule};
 use xai_x_thrift::served_history::EntityIdType;
 
 const EXCLUDED_USER_IDS_LIMIT: usize = 200;
@@ -27,7 +28,7 @@ impl Source<ScoredPostsQuery, FeedItem> for WhoToFollowSource {
     async fn source(&self, query: &ScoredPostsQuery) -> Result<Vec<FeedItem>, String> {
         let request = build_wtf_request(query);
 
-        let response = self
+        let mut response = self
             .who_to_follow_client
             .get_wtf_recommendations(request)
             .await
@@ -37,7 +38,6 @@ impl Source<ScoredPostsQuery, FeedItem> for WhoToFollowSource {
             return Ok(vec![]);
         }
 
-        let mut response = response;
         response
             .user_recommendations
             .truncate(MAX_WHO_TO_FOLLOW_USERS);
@@ -55,6 +55,36 @@ impl Source<ScoredPostsQuery, FeedItem> for WhoToFollowSource {
 
 fn build_wtf_request(query: &ScoredPostsQuery) -> AccountRecommendationsMixerRequest {
     let excluded_user_ids = get_excluded_user_ids(query);
+    let reactive = WhoToFollowReactiveContext {
+        excluded_user_ids,
+        followed_user_id: None,
+        dismissed_user_id: None,
+    };
+
+    let (product, product_context) = match query.request_type {
+        RequestType::Following => (
+            Product::HomeReverseChronWhoToFollow,
+            ProductContext {
+                context: Some(
+                    product_context::Context::HomeReverseChronWhoToFollowProductContext(
+                        HomeReverseChronWhoToFollowProductContext {
+                            wtf_reactive_context: Some(reactive),
+                        },
+                    ),
+                ),
+            },
+        ),
+        _ => (
+            Product::HomeWhoToFollow,
+            ProductContext {
+                context: Some(product_context::Context::HomeWhoToFollowProductContext(
+                    HomeWhoToFollowProductContext {
+                        wtf_reactive_context: Some(reactive),
+                    },
+                )),
+            },
+        ),
+    };
 
     AccountRecommendationsMixerRequest {
         client_context: Some(ClientContext {
@@ -66,20 +96,10 @@ fn build_wtf_request(query: &ScoredPostsQuery) -> AccountRecommendationsMixerReq
             user_agent: Some(query.user_agent.clone()),
             ..Default::default()
         }),
-        product: Product::HomeWhoToFollow as i32,
+        product: product as i32,
         debug_params: None,
         cursor: None,
-        product_context: Some(ProductContext {
-            context: Some(product_context::Context::HomeWhoToFollowProductContext(
-                HomeWhoToFollowProductContext {
-                    wtf_reactive_context: Some(WhoToFollowReactiveContext {
-                        excluded_user_ids,
-                        followed_user_id: None,
-                        dismissed_user_id: None,
-                    }),
-                },
-            )),
-        }),
+        product_context: Some(product_context),
     }
 }
 

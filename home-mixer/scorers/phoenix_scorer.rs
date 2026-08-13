@@ -3,22 +3,21 @@ use crate::models::candidate::PostCandidate;
 use crate::models::query::ScoredPostsQuery;
 use crate::params::{
     PhoenixInferenceClusterId, PhoenixRankerNewUserHistoryThreshold,
-    PhoenixRankerNewUserInferenceClusterId, UseEgressSidecar,
+    PhoenixRankerNewUserInferenceClusterId,
 };
+use crate::util::egress::PredictionDispatch;
 use crate::util::phoenix_request::build_prediction_request;
-use std::sync::Arc;
 use tonic::async_trait;
-use xai_candidate_pipeline::component_library::clients::phoenix_prediction_client::{
-    PhoenixCluster, PhoenixPredictionClient,
-};
+use xai_candidate_pipeline::component_library::clients::phoenix_prediction_client::PhoenixCluster;
 
 use xai_candidate_pipeline::component_library::utils::current_timestamp_millis;
 use xai_candidate_pipeline::scorer::Scorer;
 use xai_recsys_proto::ProductSurface;
 
+pub const PHOENIX_RANKER_KILL_SWITCH_DECIDER: &str = "disable_home_mixer_phoenix_ranker";
+
 pub struct PhoenixScorer {
-    pub phoenix_client: Arc<dyn PhoenixPredictionClient + Send + Sync>,
-    pub egress_client: Arc<dyn PhoenixPredictionClient + Send + Sync>,
+    pub dispatch: PredictionDispatch,
 }
 
 impl PhoenixScorer {
@@ -43,14 +42,17 @@ impl PhoenixScorer {
         }
 
         if let Some(decider) = &query.decider {
-            match configured_cluster {
-                PhoenixCluster::Experiment1Fou if decider.enabled("override_qf_use_lap7") => {
-                    return PhoenixCluster::Experiment1Lap7;
+            let is_prod = matches!(
+                configured_cluster,
+                PhoenixCluster::Experiment1Fou | PhoenixCluster::Experiment2Fou
+            );
+            if is_prod {
+                if decider.enabled("override_qf_use_experiment2_fou") {
+                    return PhoenixCluster::Experiment2Fou;
                 }
-                PhoenixCluster::Experiment1Lap7 if decider.enabled("override_qf_use_fou") => {
+                if decider.enabled("override_qf_use_experiment1_fou") {
                     return PhoenixCluster::Experiment1Fou;
                 }
-                _ => {}
             }
         }
 
@@ -61,7 +63,14 @@ impl PhoenixScorer {
 #[async_trait]
 impl Scorer<ScoredPostsQuery, PostCandidate> for PhoenixScorer {
     fn enable(&self, query: &ScoredPostsQuery) -> bool {
-        !query.has_cached_posts
+        if query.has_cached_posts {
+            return false;
+        }
+        let killed = query
+            .decider
+            .as_ref()
+            .is_some_and(|d| d.enabled(PHOENIX_RANKER_KILL_SWITCH_DECIDER));
+        !killed
     }
 
     async fn score(
@@ -83,21 +92,11 @@ impl Scorer<ScoredPostsQuery, PostCandidate> for PhoenixScorer {
         let cluster = Self::resolve_cluster(query);
         let request = build_prediction_request(query, candidates, product_surface);
 
-        let use_egress: bool = query.params.get(UseEgressSidecar);
-        let client = if use_egress {
-            &self.egress_client
-        } else {
-            &self.phoenix_client
-        };
-
-        let mut predictions = client.predict(cluster, request.clone()).await;
-
-        if predictions.is_err() && use_egress {
-            tracing::debug!("Egress predict failed, falling back");
-            predictions = self.phoenix_client.predict(cluster, request).await;
-        }
-
-        let predictions = predictions.map_err(|e| format!("Phoenix prediction failed: {}", e));
+        let predictions = self
+            .dispatch
+            .predict_with_fallback(query, cluster, request)
+            .await
+            .map_err(|e| format!("Phoenix prediction failed: {}", e));
 
         let predictions = match predictions {
             Ok(predictions) => predictions,

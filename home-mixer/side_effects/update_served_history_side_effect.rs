@@ -1,14 +1,17 @@
-use crate::clients::served_history_client::{ServedHistoryClient, TimelineType, client_platform};
+use crate::clients::served_history_client::{ServedHistoryClient, TimelineType};
 use crate::models::query::ScoredPostsQuery;
 use crate::params::EnableUrtMigrationComponents;
 use crate::util::string_case::upper_snake_to_pascal;
 use std::sync::Arc;
 use thrift::OrderedFloat;
 use tonic::async_trait;
+use xai_candidate_pipeline::component_library::utils::client_utils::app_id_to_served_history_id;
 use xai_candidate_pipeline::component_library::utils::is_prod;
 use xai_candidate_pipeline::side_effect::{SideEffect, SideEffectInput};
 use xai_home_mixer_proto::feed_item::Item as FeedItemKind;
-use xai_home_mixer_proto::{FeedItem, PushToHomePost, ScoredPost, ServedType, WhoToFollowModule};
+use xai_home_mixer_proto::{
+    FeedItem, Frame, PushToHomePost, ScoredPost, ServedType, WhoToFollowModule,
+};
 use xai_recsys_proto::AdIndexInfo;
 use xai_urt_thrift::operation::CursorType;
 use xai_x_thrift::served_history::{
@@ -56,15 +59,15 @@ impl SideEffect<ScoredPostsQuery, FeedItem> for UpdateServedHistorySideEffect {
         let history = ServedHistory {
             request_type: request_type(query),
             entries,
-            served_id: None,
+            served_id: Some(query.request_id as i64),
             served_time_ms: None,
         };
 
-        let platform = client_platform::from_client_app_id(query.client_app_id);
+        let platform = app_id_to_served_history_id(query.client_app_id);
         self.client
             .put(
                 query.user_id,
-                TimelineType::Home,
+                TimelineType::for_request(query.request_type),
                 platform,
                 now_ms,
                 &history,
@@ -98,6 +101,10 @@ fn build_entries(feed_item: &FeedItem, position: i64) -> Vec<EntryWithItemIds> {
         }
         Some(FeedItemKind::Prompt(_)) => vec![build_prompt_entry(position)],
         Some(FeedItemKind::PushToHome(pth)) => build_push_to_home_entries(pth, position),
+        Some(FeedItemKind::Frame(frame)) => {
+            build_frame_entry(frame, position).into_iter().collect()
+        }
+        Some(FeedItemKind::FeedSurvey(_)) => vec![build_feed_survey_entry(position)],
         None => vec![],
     }
 }
@@ -117,7 +124,11 @@ fn build_post_entries(post: &ScoredPost, position: i64) -> Vec<EntryWithItemIds>
 }
 
 fn nonzero(v: u64) -> Option<i64> {
-    if v != 0 { Some(v as i64) } else { None }
+    if v != 0 {
+        Some(v as i64)
+    } else {
+        None
+    }
 }
 
 fn build_tweet_entry(post: &ScoredPost, tweet_id: u64, position: i64) -> EntryWithItemIds {
@@ -184,6 +195,40 @@ fn build_ad_entry(ad: &AdIndexInfo, position: i64) -> EntryWithItemIds {
             impression_id: Some(impression_string),
         }]),
     }
+}
+
+fn build_feed_survey_entry(position: i64) -> EntryWithItemIds {
+    EntryWithItemIds {
+        entity_type: EntityIdType::ANNOTATION,
+        sort_index: Some(position),
+        size: None,
+        item_ids: None,
+    }
+}
+
+fn build_frame_entry(frame: &Frame, position: i64) -> Option<EntryWithItemIds> {
+    if frame.fetch_route.is_empty() {
+        return None;
+    }
+    Some(EntryWithItemIds {
+        entity_type: crate::frames::FRAME_ENTITY_TYPE,
+        sort_index: Some(position),
+        size: None,
+        item_ids: Some(vec![ItemIds {
+            tweet_id: None,
+            source_tweet_id: None,
+            quote_tweet_id: None,
+            source_author_id: None,
+            quote_author_id: None,
+            in_reply_to_tweet_id: None,
+            in_reply_to_author_id: None,
+            article_id: None,
+            tweet_score: None,
+            entry_id_to_replace: None,
+            user_id: None,
+            impression_id: Some(frame.fetch_route.clone()),
+        }]),
+    })
 }
 
 fn build_prompt_entry(position: i64) -> EntryWithItemIds {

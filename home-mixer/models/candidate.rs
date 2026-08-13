@@ -20,6 +20,9 @@ pub struct PostCandidate {
     pub last_scored_at_ms: Option<u64>,
     pub weighted_score: Option<f64>,
     pub score: Option<f64>,
+    pub slate_context: Option<SlateContext>,
+    #[serde(default)]
+    pub mpn_parts: Option<MpnParts>,
     #[serde(
         serialize_with = "serialize_served_type",
         deserialize_with = "deserialize_served_type"
@@ -27,6 +30,8 @@ pub struct PostCandidate {
     pub served_type: Option<pb::ServedType>,
     pub in_network: Option<bool>,
     pub ancestors: Vec<u64>,
+    pub tombstone_ancestor_ids: Vec<u64>,
+    pub ancestor_users: Vec<u64>,
     pub min_video_duration_ms: Option<i32>,
     pub quoted_video_duration_ms: Option<i32>,
     pub author_followers_count: Option<i32>,
@@ -43,15 +48,43 @@ pub struct PostCandidate {
     #[serde(default)]
     pub following_replied_user_ids: Vec<u64>,
     pub has_media: Option<bool>,
+    pub broadcast_is_live: Option<bool>,
     pub language_code: Option<String>,
     pub fav_count: Option<i64>,
     pub reply_count: Option<i64>,
     pub repost_count: Option<i64>,
     pub quote_count: Option<i64>,
+    pub view_count: Option<u64>,
+    pub bookmark_count: Option<i64>,
     pub mutual_follow_jaccard: Option<f64>,
+    pub is_mutual_follow_author: Option<bool>,
+    pub author_follows_viewer: Option<bool>,
     pub brand_safety_verdict: Option<BrandSafetyVerdict>,
+    pub nsfw_author: Option<bool>,
+    pub nsfw_author_ads: Option<bool>,
     #[serde(default)]
     pub safety_labels: Vec<SafetyLabelInfo>,
+    #[serde(default)]
+    pub semantic_ids: Option<Vec<i32>>,
+    pub topic_feedback_topic: Option<String>,
+    pub topic_feedback_topic_id: Option<String>,
+    pub grok_topics: Option<Vec<String>>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SlateContext {
+    pub k: u32,
+    pub pool_rank: u32,
+    pub pool_rank_gap: Option<u32>,
+    pub fatigue: f64,
+    pub pre_diversity_score: f64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct MpnParts {
+    pub pos: f64,
+    pub neg: f64,
+    pub scalar_multiplier: f64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -90,6 +123,7 @@ pub trait CandidateHelpers {
     fn get_original_tweet_id(&self) -> u64;
     fn get_original_author_id(&self) -> u64;
     fn as_tweet_info(&self, is_followed_by_viewer: bool) -> xai_recsys_proto::TweetInfo;
+    fn as_score_info(&self) -> xai_recsys_proto::ScoreInfo;
 }
 
 impl CandidateHelpers for PostCandidate {
@@ -112,6 +146,22 @@ impl CandidateHelpers for PostCandidate {
 
     fn get_original_author_id(&self) -> u64 {
         self.retweeted_user_id.unwrap_or(self.author_id)
+    }
+
+    fn as_score_info(&self) -> xai_recsys_proto::ScoreInfo {
+        xai_recsys_proto::ScoreInfo {
+            prediction_scores: self.phoenix_scores.as_prediction_scores(),
+            weighted_score: self.weighted_score,
+            final_score: self.score,
+            slate_context: self.slate_context.map(|c| xai_recsys_proto::SlateContext {
+                k: c.k,
+                pool_rank: c.pool_rank,
+                pool_rank_gap: c.pool_rank_gap,
+                fatigue: c.fatigue,
+                pre_diversity_score: c.pre_diversity_score,
+            }),
+            reward_rerank_slot_prob: None,
+        }
     }
 
     fn as_tweet_info(&self, is_followed_by_viewer: bool) -> xai_recsys_proto::TweetInfo {
@@ -137,6 +187,8 @@ impl CandidateHelpers for PostCandidate {
             retweet_count: self.repost_count.unwrap_or(0) as u64,
             quote_count: self.quote_count.unwrap_or(0) as u64,
             reply_count: self.reply_count.unwrap_or(0) as u64,
+            view_count: self.view_count.unwrap_or(0),
+            bookmark_count: self.bookmark_count.unwrap_or(0) as u64,
             language_code: xai_recsys_proto::language_code_string_to_enum(
                 self.language_code.as_deref().unwrap_or(""),
             ) as i32,
@@ -147,7 +199,87 @@ impl CandidateHelpers for PostCandidate {
                 is_reply: self.in_reply_to_tweet_id.is_some(),
                 ..Default::default()
             }),
+            author_info: Some(xai_recsys_proto::AuthorInfo {
+                author_id: self.get_original_author_id(),
+                is_followed_by_user: is_followed_by_viewer,
+                is_following_user: if self.retweeted_user_id.is_none() {
+                    self.author_follows_viewer
+                } else {
+                    None
+                },
+                ..Default::default()
+            }),
+            semantic_ids: self.semantic_ids.clone().unwrap_or_default(),
             ..Default::default()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safety_label_info_serde_roundtrip() {
+        use xai_x_thrift::tweet_safety_label::SafetyLabelType;
+
+        let info = SafetyLabelInfo {
+            label_type: SafetyLabelType::NSFW_HIGH_PRECISION,
+            description: Some("test desc".to_string()),
+            source: Some("Content".to_string()),
+        };
+
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"label_type\":3"), "got: {json}");
+
+        let deserialized: SafetyLabelInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            deserialized.label_type,
+            SafetyLabelType::NSFW_HIGH_PRECISION
+        );
+        assert_eq!(deserialized.description, Some("test desc".to_string()));
+        assert_eq!(deserialized.source, Some("Content".to_string()));
+    }
+
+    #[test]
+    fn safety_label_info_deserializes_from_i32() {
+        use xai_x_thrift::tweet_safety_label::SafetyLabelType;
+
+        let json = r#"{"label_type":1,"description":null,"source":null}"#;
+        let info: SafetyLabelInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(info.label_type, SafetyLabelType::SPAM);
+    }
+
+    #[test]
+    fn post_candidate_deserializes_without_slate_context_field() {
+        let mut value = serde_json::to_value(PostCandidate::default()).unwrap();
+        value.as_object_mut().unwrap().remove("slate_context");
+
+        let candidate: PostCandidate = serde_json::from_value(value).unwrap();
+        assert_eq!(candidate.slate_context, None);
+    }
+
+    #[test]
+    fn post_candidate_with_safety_labels_roundtrip() {
+        use xai_x_thrift::tweet_safety_label::SafetyLabelType;
+
+        let candidate = PostCandidate {
+            tweet_id: 123,
+            author_id: 456,
+            safety_labels: vec![SafetyLabelInfo {
+                label_type: SafetyLabelType::BOUNCE,
+                description: None,
+                source: None,
+            }],
+            ..Default::default()
+        };
+
+        let json = serde_json::to_string(&candidate).unwrap();
+        let deserialized: PostCandidate = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.safety_labels.len(), 1);
+        assert_eq!(
+            deserialized.safety_labels[0].label_type,
+            SafetyLabelType::BOUNCE
+        );
     }
 }

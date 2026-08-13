@@ -2,14 +2,14 @@ use crate::filters::topic_ids_filter::TopicFilteringOverrideMap;
 use crate::models::candidate::PostCandidate;
 use crate::models::candidate_features::{FilteredTopicsByExperiment, TopicFilteringExperiment};
 use crate::models::query::ScoredPostsQuery;
-use crate::params::{EnableNewUserTopicFiltering, TopicFilteringId, TopicFilteringOverrides};
+use crate::params::{TopicFilteringId, TopicFilteringOverrides};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tonic::async_trait;
 use tracing::warn;
 use xai_candidate_pipeline::component_library::clients::StratoClient;
 use xai_candidate_pipeline::hydrator::Hydrator;
-use xai_strato::{StratoResult, StratoValue, decode};
+use xai_strato::{decode, StratoResult, StratoValue};
 
 fn decode_topics_pair(
     result: &Result<Vec<u8>, Box<dyn std::error::Error>>,
@@ -53,9 +53,7 @@ pub struct FilteredTopicsHydrator {
 #[async_trait]
 impl Hydrator<ScoredPostsQuery, PostCandidate> for FilteredTopicsHydrator {
     fn enable(&self, query: &ScoredPostsQuery) -> bool {
-        query.is_topic_request()
-            || query.has_excluded_topics()
-            || (query.params.get(EnableNewUserTopicFiltering) && query.has_new_user_topic_ids())
+        query.is_topic_request() || query.has_excluded_topics()
     }
 
     async fn hydrate(

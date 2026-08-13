@@ -1,12 +1,15 @@
-use crate::clients::gender_prediction_client::GenderPredictionGrpcClient;
-use crate::clients::user_inferred_gender_store_client::UserInferredGenderStoreClient;
 use crate::models::query::ScoredPostsQuery;
 use crate::params::EnableInferredGenderHydration;
 use std::sync::Arc;
+use std::time::Duration;
 use tonic::async_trait;
+use xai_candidate_pipeline::component_library::clients::gender_prediction_client::GenderPredictionGrpcClient;
+use xai_candidate_pipeline::component_library::clients::user_inferred_gender_store_client::UserInferredGenderStoreClient;
 use xai_candidate_pipeline::component_library::utils::days_since_creation;
 use xai_candidate_pipeline::query_hydrator::QueryHydrator;
 use xai_recsys_proto::gender_prediction::InferredGenderLabel;
+
+const MH_GET_TIMEOUT: Duration = Duration::from_millis(300);
 
 pub struct UserInferredGenderQueryHydrator {
     mh_client: Arc<dyn UserInferredGenderStoreClient>,
@@ -32,7 +35,11 @@ impl QueryHydrator<ScoredPostsQuery> for UserInferredGenderQueryHydrator {
     }
 
     async fn hydrate(&self, query: &ScoredPostsQuery) -> Result<ScoredPostsQuery, String> {
-        let result = match self.mh_client.fetch(query.user_id).await? {
+        let mh_result = tokio::time::timeout(MH_GET_TIMEOUT, self.mh_client.fetch(query.user_id))
+            .await
+            .map_err(|_| "InferredGender MH get timed out".to_string())??;
+
+        let result = match mh_result {
             Some(r) => Some(r),
             None if is_new_user(query.user_id) => self.grpc_client.predict(query.user_id).await?,
             None => None,

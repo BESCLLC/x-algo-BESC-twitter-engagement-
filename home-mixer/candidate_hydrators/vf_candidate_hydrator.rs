@@ -1,5 +1,6 @@
 use crate::models::candidate::PostCandidate;
 use crate::models::query::ScoredPostsQuery;
+use crate::params::EnableXaiVfClient;
 use anyhow::Result;
 use futures::future::join;
 use std::collections::HashMap;
@@ -11,19 +12,26 @@ use xai_twittercontext_proto::TwitterContextViewer;
 use xai_visibility_filtering::models::{Action, FilteredReason};
 use xai_visibility_filtering::vf_client::SafetyLevel;
 use xai_visibility_filtering::vf_client::SafetyLevel::{TimelineHome, TimelineHomeRecommendations};
-use xai_visibility_filtering::vf_client::VisibilityFilteringClient;
+use xai_visibility_filtering::vf_client::VfClient;
 
 pub struct VFCandidateHydrator {
-    pub vf_client: Arc<dyn VisibilityFilteringClient + Send + Sync>,
+    pub strato_vf_client: Arc<dyn VfClient + Send + Sync>,
+    pub xai_vf_client: Arc<dyn VfClient + Send + Sync>,
 }
 
 impl VFCandidateHydrator {
-    pub async fn new(vf_client: Arc<dyn VisibilityFilteringClient + Send + Sync>) -> Self {
-        Self { vf_client }
+    pub async fn new(
+        strato_vf_client: Arc<dyn VfClient + Send + Sync>,
+        xai_vf_client: Arc<dyn VfClient + Send + Sync>,
+    ) -> Self {
+        Self {
+            strato_vf_client,
+            xai_vf_client,
+        }
     }
 
     async fn fetch_vf_results(
-        client: &Arc<dyn VisibilityFilteringClient + Send + Sync>,
+        client: &Arc<dyn VfClient + Send + Sync>,
         tweet_ids: Vec<u64>,
         safety_level: SafetyLevel,
         for_user_id: u64,
@@ -48,7 +56,12 @@ impl Hydrator<ScoredPostsQuery, PostCandidate> for VFCandidateHydrator {
     ) -> Vec<Result<PostCandidate, String>> {
         let context = query.get_viewer();
         let user_id = query.user_id;
-        let client = &self.vf_client;
+        // Fully migrated to Rust VF. Old VF available in the event of production issues.
+        let client = if query.params.get(EnableXaiVfClient) {
+            &self.xai_vf_client
+        } else {
+            &self.strato_vf_client
+        };
 
         let mut in_network_ids: Vec<u64> = Vec::new();
         let mut oon_ids: Vec<u64> = Vec::new();
@@ -128,6 +141,9 @@ fn should_drop_ancillary(
     vf_results: &HashMap<u64, Result<Option<FilteredReason>>>,
 ) -> bool {
     for &ancestor_id in &candidate.ancestors {
+        if candidate.tombstone_ancestor_ids.contains(&ancestor_id) {
+            continue;
+        }
         if let Some(Ok(Some(reason))) = vf_results.get(&ancestor_id)
             && should_drop_reason(reason)
         {
@@ -157,6 +173,6 @@ fn should_drop_reason(reason: &FilteredReason) -> bool {
         FilteredReason::SafetyResult(safety_result) => {
             matches!(safety_result.action, Action::Drop(_))
         }
-        _ => true,
+        _ => true, 
     }
 }

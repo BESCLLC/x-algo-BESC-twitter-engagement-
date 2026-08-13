@@ -2,9 +2,9 @@ use crate::candidate_pipeline::for_you_candidate_pipeline::ForYouCandidatePipeli
 use crate::models::query::ScoredPostsQuery;
 use crate::params;
 use crate::server::QueryBuilder;
+use crate::util::feed_log;
 use crate::util::urt;
 use tonic::Status;
-use tracing::info;
 use xai_candidate_pipeline::candidate_pipeline::CandidatePipeline;
 use xai_home_mixer_proto::FeedItem;
 
@@ -34,6 +34,7 @@ impl ForYouFeedServer {
         }
 
         let result = self.pipeline.execute(query).await;
+        feed_log::log_feed_response(&result);
 
         Ok(ForYouFeedOutput {
             items: result.selected_candidates,
@@ -44,7 +45,7 @@ impl ForYouFeedServer {
         &self,
         query: ScoredPostsQuery,
     ) -> Result<Vec<u8>, Status> {
-        log_request_info(&query);
+        feed_log::log_feed_request(&query);
 
         let cursor = query.cursor.clone();
         let request_context = query.request_context.clone();
@@ -52,6 +53,12 @@ impl ForYouFeedServer {
         let viewer_id = query.user_id;
         let language_code = query.language_code.clone();
         let country_code = query.country_code.clone();
+        let request_type = query.request_type;
+        let request_id = query.request_id;
+        let entry_id_nonce = query
+            .params
+            .get(params::EnableEntryIdRandomHash)
+            .then_some(query.request_id);
 
         let output = self.get_for_you_feed(query).await?;
 
@@ -67,21 +74,12 @@ impl ForYouFeedServer {
             } else {
                 Some(&country_code)
             },
+            entry_id_nonce,
+            request_type,
+            request_id,
         );
 
         xai_urt_thrift::serialize_binary(&timeline_response)
             .map_err(|e| Status::internal(format!("failed to serialize URT: {e}")))
     }
-}
-
-fn log_request_info(query: &ScoredPostsQuery) {
-    info!(
-        request_id = query.request_id,
-        user_id = query.user_id,
-        app_id = query.client_app_id,
-        request_context = %query.request_context,
-        cursor = ?query.cursor,
-        seen_ids = query.seen_ids.len(),
-        "For You Feed URT request -"
-    );
 }

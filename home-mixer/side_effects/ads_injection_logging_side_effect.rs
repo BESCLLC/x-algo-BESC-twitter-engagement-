@@ -1,18 +1,20 @@
-use crate::clients::kafka_publisher_client::{
-    ADS_INJECTION_TOPIC, KafkaCluster, KafkaPublisherClient, ProdKafkaPublisherClient,
-};
-use crate::models::query::ScoredPostsQuery;
+use crate::models::query::{RequestType, ScoredPostsQuery};
 use crate::params::EnableAdsInjectionLogging;
 use prost::Message;
 use std::sync::Arc;
 use tonic::async_trait;
 use xai_ads_injection_proto::ads_injected_timeline::{
-    AdsInjectedTimeline, Counts, DisplayLocation, SubscriptionLevel, TimelineEntry,
+    AdsInjectedTimeline, Counts, SubscriptionLevel, TimelineEntry,
+};
+use xai_candidate_pipeline::component_library::clients::kafka_publisher_client::{
+    KafkaCluster, KafkaPublisherClient, ProdKafkaPublisherClient, ADS_INJECTION_TOPIC,
 };
 use xai_candidate_pipeline::component_library::utils::is_prod;
 use xai_candidate_pipeline::side_effect::{SideEffect, SideEffectInput};
 use xai_core_entities::entities::SubscriptionLevel as CoreSubscriptionLevel;
-use xai_home_mixer_proto::{FeedItem, feed_item};
+use xai_home_mixer_proto::{feed_item, FeedItem};
+use xai_recsys_proto::{AdAdjacencyControl, AdIndexInfo, ProductSurface};
+use xai_served_impression_proto::served_impression::DisplayLocation;
 
 #[derive(Clone)]
 pub struct AdsInjectionLoggingSideEffect {
@@ -59,11 +61,23 @@ impl SideEffect<ScoredPostsQuery, FeedItem> for AdsInjectionLoggingSideEffect {
             return Ok(());
         }
 
+        let display_location = match query.request_type {
+            RequestType::RankedFollowing | RequestType::Following => {
+                DisplayLocation::TimelineHomeReverseChron
+            }
+            _ => DisplayLocation::TimelineHome,
+        };
+        let product_surface = match query.request_type {
+            RequestType::RankedFollowing => ProductSurface::HomeTimelineRankedFollowing,
+            RequestType::Following => ProductSurface::HomeTimelineLatest,
+            _ => ProductSurface::HomeTimelineRanking,
+        };
+
         let timeline = AdsInjectedTimeline {
             user_id: query.user_id,
             entries,
             request_time_ms,
-            display_location: DisplayLocation::TimelineHome.into(),
+            display_location: display_location.into(),
             country_code: query.country_code.clone(),
             request_id: query.request_id,
             subscription_level: query
@@ -80,6 +94,8 @@ impl SideEffect<ScoredPostsQuery, FeedItem> for AdsInjectionLoggingSideEffect {
             }),
             ip_address: query.ip_address.clone(),
             user_agent: query.user_agent.clone(),
+            ads_injection_experiment_bucket: String::new(),
+            product_surface: product_surface.into(),
         };
 
         let bytes = timeline.encode_to_vec();
@@ -110,16 +126,32 @@ fn build_timeline_entry(item: &FeedItem, position: usize) -> TimelineEntry {
             promoted: true,
             impression_id: ad.impression_id as u64,
             brand_safety_verdict: 0,
-            ad_info: Some(ad.clone()),
+            ad_info: Some(slim_ad_info(ad)),
             safety_labels: vec![],
         },
         Some(feed_item::Item::WhoToFollow(_))
         | Some(feed_item::Item::Prompt(_))
         | Some(feed_item::Item::PushToHome(_))
+        | Some(feed_item::Item::Frame(_))
+        | Some(feed_item::Item::FeedSurvey(_))
         | None => TimelineEntry {
             position: position as i32,
             ..Default::default()
         },
+    }
+}
+
+fn slim_ad_info(ad: &AdIndexInfo) -> AdIndexInfo {
+    AdIndexInfo {
+        account_id: ad.account_id,
+        ad_adjacency_control: ad
+            .ad_adjacency_control
+            .as_ref()
+            .map(|c| AdAdjacencyControl {
+                brand_safety_risk: c.brand_safety_risk,
+                ..Default::default()
+            }),
+        ..Default::default()
     }
 }
 

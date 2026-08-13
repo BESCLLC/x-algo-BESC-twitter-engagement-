@@ -1,5 +1,5 @@
 use crate::clients::past_request_timestamps_client::PastRequestTimestampsClient;
-use crate::models::query::ScoredPostsQuery;
+use crate::models::query::{RequestType, ScoredPostsQuery};
 use crate::params::EnableUrtMigrationComponents;
 use std::sync::Arc;
 use tonic::async_trait;
@@ -45,10 +45,14 @@ impl SideEffect<ScoredPostsQuery, FeedItem> for UpdatePastRequestTimestampsSideE
             .as_ref()
             .map(|npt| &npt.non_polling_timestamps_ms[..])
             .unwrap_or(&[]);
-        let most_recent = query
-            .non_polling_timestamps
-            .as_ref()
-            .and_then(|npt| npt.most_recent_home_latest_non_polling_timestamp_ms);
+
+        let most_recent = match query.request_type {
+            RequestType::RankedFollowing | RequestType::Following => Some(now_ms),
+            _ => query
+                .non_polling_timestamps
+                .as_ref()
+                .and_then(|npt| npt.most_recent_home_latest_non_polling_timestamp_ms),
+        };
 
         let timestamps: Vec<i64> = std::iter::once(now_ms)
             .chain(prior_timestamps.iter().copied())

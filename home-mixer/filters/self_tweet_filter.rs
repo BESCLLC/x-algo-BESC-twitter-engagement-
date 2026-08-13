@@ -2,7 +2,6 @@ use crate::models::candidate::PostCandidate;
 use crate::models::query::ScoredPostsQuery;
 use xai_candidate_pipeline::filter::{Filter, FilterResult};
 
-/// Filter that removes tweets where the author is the viewer.
 pub struct SelfTweetFilter;
 
 impl Filter<ScoredPostsQuery, PostCandidate> for SelfTweetFilter {

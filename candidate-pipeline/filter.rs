@@ -1,7 +1,8 @@
 use crate::candidate_pipeline::{PipelineCandidate, PipelineQuery};
 use crate::util;
-use std::any::{Any, type_name_of_val};
-use tracing::{Span, field::Empty};
+use crate::SPAN_LEVEL;
+use std::any::{type_name_of_val, Any};
+use tracing::{field::Empty, Span};
 use xai_stats_receiver::global_stats_receiver;
 
 const KEPT_SCOPE: [(&str, &str); 1] = [("requests", "kept")];
@@ -12,19 +13,17 @@ pub struct FilterResult<C> {
     pub removed: Vec<C>,
 }
 
-/// Filters run sequentially and partition candidates into kept and removed sets
 pub trait Filter<Q, C>: Any + Send + Sync
 where
     Q: PipelineQuery,
     C: PipelineCandidate,
 {
-    /// Decide if this filter should run for the given query
     fn enable(&self, _query: &Q) -> bool {
         true
     }
 
     #[xai_stats_macro::receive_stats(latency=Bucket0To50)]
-    #[tracing::instrument(skip_all, name = "filter", fields(
+    #[tracing::instrument(level = SPAN_LEVEL, skip_all, name = "filter", fields(
         name = self.name(),
         input_count = candidates.len(),
         kept_count = Empty,
@@ -43,13 +42,18 @@ where
         span.record("kept_count", result.kept.len());
         span.record("removed_count", result.removed.len());
         span.record("filter_rate", format!("{:.3}", rate).as_str());
+        #[cfg(feature = "quiet-spans")]
+        tracing::info!(
+            component = self.name(),
+            kept_count = result.kept.len(),
+            removed_count = result.removed.len(),
+            filter_rate = format!("{rate:.3}"),
+            "filter"
+        );
         self.stat(&result);
         result
     }
 
-    /// Filter candidates by evaluating each against some criteria.
-    /// Returns a FilterResult containing kept candidates (which continue to the next stage)
-    /// and removed candidates (which are excluded from further processing).
     fn filter(&self, query: &Q, candidates: Vec<C>) -> FilterResult<C>;
 
     fn name(&self) -> &'static str {

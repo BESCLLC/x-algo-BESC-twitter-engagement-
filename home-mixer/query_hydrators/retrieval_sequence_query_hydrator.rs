@@ -3,14 +3,14 @@ use crate::clients::user_action_aggregation_client::{
 };
 use crate::models::query::ScoredPostsQuery;
 use crate::params::{
-    self as p, IncludeRealtimeActions, MaxSeqLengthRetrieval, PhoenixRetrievalAggregationType,
-    UasSourceDataType, UseXdsForUas, UserActionsClusterId,
+    self as p, EnableRetrievalSequenceHydration, MaxSeqLengthRetrieval,
+    PhoenixRetrievalAggregationType, UasSourceDataType, UseXdsForUas, UserActionsClusterId,
 };
 use std::sync::Arc;
 use tonic::async_trait;
 use xai_candidate_pipeline::query_hydrator::QueryHydrator;
 use xai_recsys_proto::{
-    ResponseFormat, UserActionAggregationType, UserActionSequenceSourceDataType,
+    ResponseFormat, UaasModelType, UserActionAggregationType, UserActionSequenceSourceDataType,
 };
 
 pub struct RetrievalSequenceQueryHydrator {
@@ -29,9 +29,12 @@ impl RetrievalSequenceQueryHydrator {
 
 #[async_trait]
 impl QueryHydrator<ScoredPostsQuery> for RetrievalSequenceQueryHydrator {
+    fn enable(&self, query: &ScoredPostsQuery) -> bool {
+        query.params.get(EnableRetrievalSequenceHydration)
+    }
+
     async fn hydrate(&self, query: &ScoredPostsQuery) -> Result<ScoredPostsQuery, String> {
         let cluster = UserActionsCluster::parse(&query.params.get(UserActionsClusterId));
-        let include_realtime: bool = query.params.get(IncludeRealtimeActions);
 
         let source_data_type =
             UserActionSequenceSourceDataType::from_str_name(&query.params.get(UasSourceDataType))
@@ -47,12 +50,12 @@ impl QueryHydrator<ScoredPostsQuery> for RetrievalSequenceQueryHydrator {
                 UserActionAggregationType::from_str_name(
                     &query.params.get(PhoenixRetrievalAggregationType),
                 )
-                .unwrap_or(UserActionAggregationType::Dense),
+                .unwrap_or(UserActionAggregationType::DenseWithFavVqvCleaned),
                 source_data_type,
                 ResponseFormat::Arrow,
-                if include_realtime { Some(true) } else { None },
                 None,
                 use_xds,
+                UaasModelType::Retrieval,
             )
             .await
             .map_err(|e| format!("Aggregation service call failed: {}", e))?;

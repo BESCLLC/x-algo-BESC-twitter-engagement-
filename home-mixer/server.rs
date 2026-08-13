@@ -1,30 +1,42 @@
+use crate::candidate_pipeline::following_candidate_pipeline::FollowingCandidatePipeline;
 use crate::candidate_pipeline::for_you_candidate_pipeline::ForYouCandidatePipeline;
 use crate::candidate_pipeline::phoenix_candidate_pipeline::PhoenixCandidatePipeline;
+use crate::candidate_pipeline::phoenix_scores_pipeline::PhoenixScoresPipeline;
+use crate::candidate_pipeline::ranked_following_candidate_pipeline::RankedFollowingCandidatePipeline;
 use crate::clients::gizmoduck_client::{
     GizmoduckClient, MockGizmoduckClient, ProdGizmoduckClient, ViewerData,
 };
+use crate::clients::resurrection_date_client::{
+    compute_resurrection_fs_fields, MockResurrectionDateClient, ProdResurrectionDateClient,
+    ResurrectionDateClient,
+};
+use crate::following_feed_server::FollowingFeedServer;
 use crate::for_you_server::ForYouFeedServer;
 use crate::models::candidate::PostCandidate;
-use crate::models::query::ScoredPostsQuery;
+use crate::models::query::{RequestType, ScoredPostsQuery};
 use crate::params;
-use crate::scored_posts_server::{ScoredPostsServer, build_debug_json};
+use crate::phoenix_scores_server::{build_query_builder_input, PhoenixScoresServer};
+use crate::ranked_following_feed_server::RankedFollowingFeedServer;
+use crate::scored_posts_server::{build_debug_json, ScoredPostsServer};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tonic::codec::CompressionEncoding;
 use tonic::{Request, Response, Status};
-use tracing::{Instrument, info_span};
+use tracing::{info_span, Instrument};
 use xai_candidate_pipeline::candidate_pipeline::PipelineResult;
 use xai_candidate_pipeline::component_library::utils::{
-    days_since_creation, generate_request_id, is_sampled, non_zero, resolve_request_id,
+    creation_epoch_days, days_since_creation, duration_since_creation_opt, generate_request_id,
+    non_zero, resolve_request_id,
 };
 use xai_decider::{Decider, DeciderStore};
 use xai_feature_switches::{FeatureSwitches, RecipientBuilder};
 use xai_home_mixer_proto as pb;
 use xai_home_mixer_proto::{
-    DebugScoredPostsResponse, ForYouFeedResponse, ForYouFeedUrtResponse, ScoredPost,
-    ScoredPostsResponse,
+    DebugPhoenixScoresResponse, DebugScoredPostsResponse, FollowingFeedResponse,
+    FollowingFeedUrtResponse, ForYouFeedResponse, ForYouFeedUrtResponse, PhoenixScoresResponse,
+    RankedFollowingFeedResponse, RankedFollowingFeedUrtResponse, ScoredPost, ScoredPostsResponse,
 };
-use xai_pipeline_tracing::{B3RequestInfo, extract_b3_info};
+use xai_pipeline_tracing::{extract_b3_info, B3RequestInfo};
 use xai_recsys_proto::{network_type_string_to_enum, timezone_string_to_enum};
 use xai_urt_thrift::cursor_utils;
 use xai_urt_thrift::operation::CursorType;
@@ -45,6 +57,8 @@ pub(crate) struct PipelineOutput {
 
 pub struct HomeMixerConfig {
     pub shard_coordinate: Option<ShardCoordinate>,
+    pub phoenix_xds: crate::candidate_pipeline::PhoenixXdsConfig,
+    pub vm_ranker_xds: crate::candidate_pipeline::VmRankerXdsConfig,
 }
 
 #[derive(Clone)]
@@ -53,6 +67,7 @@ pub struct QueryBuilder {
     decider: Decider,
     datacenter: String,
     gizmoduck_client: Arc<dyn GizmoduckClient + Send + Sync>,
+    resurrection_date_client: Arc<dyn ResurrectionDateClient>,
 }
 
 impl QueryBuilder {
@@ -62,6 +77,7 @@ impl QueryBuilder {
         proto_query: pb::ScoredPostsQuery,
         fs_overrides: std::collections::HashMap<String, String>,
         span_name: &'static str,
+        request_type: RequestType,
     ) -> Result<RequestContext, Status> {
         if proto_query.viewer_id == 0 {
             return Err(Status::invalid_argument("viewer_id must be specified"));
@@ -70,15 +86,20 @@ impl QueryBuilder {
             b3_info.force_sample();
         }
 
-        let viewer_data = self.fetch_viewer_data(proto_query.viewer_id).await;
+        let (viewer_data, resurrection_time_ms) = tokio::join!(
+            self.fetch_viewer_data(proto_query.viewer_id),
+            self.fetch_resurrection_time(proto_query.viewer_id),
+        );
 
         let in_network_only =
             proto_query.in_network_only || viewer_data.allow_for_you_recommendations == Some(false);
 
         let params = self.evaluate_feature_switches(
             &proto_query,
+            request_type,
             &viewer_data.roles,
             viewer_data.has_phone_number,
+            resurrection_time_ms,
             &fs_overrides,
         );
 
@@ -86,7 +107,8 @@ impl QueryBuilder {
         let device_status = proto_query.device_status.unwrap_or_default();
         let prediction_id = generate_request_id();
         let request_id = resolve_request_id(proto_query.request_id);
-        let query = ScoredPostsQuery::new(
+        let is_shadow_traffic = crate::util::shadow::is_shadow_traffic(&params, request_id);
+        let mut query = ScoredPostsQuery::new(
             proto_query.viewer_id,
             proto_query.client_app_id,
             proto_query.country_code,
@@ -114,11 +136,15 @@ impl QueryBuilder {
             device_status.mobile_device_id,
             device_status.mobile_device_ad_id,
             viewer_data.subscription_level,
-            is_sampled(request_id, 0.5),
+            is_shadow_traffic,
             proto_query.is_preview,
             viewer_data.age_in_years,
             push_to_home_post_id,
         );
+        query.request_type = request_type;
+        query.resurrection_time_ms = resurrection_time_ms;
+
+        query.dsp_client_context = proto_query.dsp_client_context;
 
         let root_span = b3_info.root_span(info_span!(
             "request",
@@ -138,27 +164,49 @@ impl QueryBuilder {
     fn evaluate_feature_switches(
         &self,
         proto_query: &pb::ScoredPostsQuery,
+        request_type: RequestType,
         user_roles: &[String],
         has_phone_number: bool,
+        resurrection_time_ms: Option<i64>,
         fs_overrides: &std::collections::HashMap<String, String>,
     ) -> xai_feature_switches::Params {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        let account_age_days = days_since_creation(proto_query.viewer_id);
+        let account_creation_date = creation_epoch_days(proto_query.viewer_id);
+        let account_age_minutes = duration_since_creation_opt(proto_query.viewer_id)
+            .map(|age| (age.as_secs() / 60) as i64);
+
+        let (user_resurrected_date, days_since_resurrection) =
+            compute_resurrection_fs_fields(now_ms, resurrection_time_ms);
+        let minutes_since_resurrection = resurrection_time_ms
+            .filter(|&t| t >= 0)
+            .map(|t| (now_ms - t) / 60_000);
+        let client_version = proto_query
+            .device_status
+            .as_ref()
+            .map(|d| d.client_version.as_str());
+
         let recipient = RecipientBuilder::new()
             .user_id(proto_query.viewer_id)
             .country(&proto_query.country_code)
             .language(&proto_query.language_code)
             .client_app_id(proto_query.client_app_id as i64)
+            .client_version_opt(client_version)
+            .user_roles(user_roles.iter().cloned())
             .custom_string("datacenter", &self.datacenter)
-            .custom_i64(
-                "account_age_days",
-                days_since_creation(proto_query.viewer_id),
-            )
-            .custom_bool("has_phone_number", has_phone_number);
-        let recipient = if !user_roles.is_empty() {
-            recipient.user_roles(user_roles.iter().cloned())
-        } else {
-            recipient
-        };
-        let mut results = self.feature_switches.match_recipient(&recipient.build());
+            .custom_i64("account_age_days", account_age_days)
+            .custom_i64("account_creation_date", account_creation_date)
+            .custom_bool("has_phone_number", has_phone_number)
+            .custom_string("product", request_type.to_string())
+            .custom_opt_i64("user_resurrected_date", user_resurrected_date)
+            .custom_opt_i64("days_since_resurrection", days_since_resurrection)
+            .custom_opt_i64("account_age_minutes", account_age_minutes)
+            .custom_opt_i64("minutes_since_resurrection", minutes_since_resurrection)
+            .build();
+        let mut results = self.feature_switches.match_recipient(&recipient);
 
         if !fs_overrides.is_empty() {
             for (key, value) in fs_overrides {
@@ -186,12 +234,32 @@ impl QueryBuilder {
         }
     }
 
+    async fn fetch_resurrection_time(&self, user_id: u64) -> Option<i64> {
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(VIEWER_ROLES_TIMEOUT_MS),
+            self.resurrection_date_client.fetch(user_id),
+        )
+        .await
+        {
+            Ok(Ok(ts)) => ts,
+            Ok(Err(e)) => {
+                tracing::warn!(user_id, error = %e, "failed to fetch resurrection date");
+                None
+            }
+            Err(_) => {
+                tracing::warn!(user_id, "resurrection date fetch timed out");
+                None
+            }
+        }
+    }
+
     pub fn mock() -> Self {
         Self {
             feature_switches: Arc::new(FeatureSwitches::new(vec![]).unwrap()),
             decider: Decider::new(DeciderStore::new(HashMap::new())),
             datacenter: "mock".to_string(),
             gizmoduck_client: Arc::new(MockGizmoduckClient::default()),
+            resurrection_date_client: Arc::new(MockResurrectionDateClient),
         }
     }
 }
@@ -199,8 +267,10 @@ impl QueryBuilder {
 pub struct HomeMixerServer {
     scored_posts: Arc<ScoredPostsServer>,
     for_you: Arc<ForYouFeedServer>,
+    ranked_following: Arc<RankedFollowingFeedServer>,
+    following: Arc<FollowingFeedServer>,
+    phoenix_scores: Arc<PhoenixScoresServer>,
 }
-
 
 #[tonic::async_trait]
 impl pb::scored_posts_service_server::ScoredPostsService for ScoredPostsServer {
@@ -217,6 +287,7 @@ impl pb::scored_posts_service_server::ScoredPostsService for ScoredPostsServer {
                 request.into_inner(),
                 Default::default(),
                 "scored_posts",
+                RequestType::ScoredPosts,
             )
             .await?;
         let RequestContext {
@@ -247,7 +318,13 @@ impl pb::scored_posts_service_server::ScoredPostsService for ScoredPostsServer {
 
         let ctx = self
             .query_builder
-            .build(b3_info, proto_query, fs_overrides, "debug_scored_posts")
+            .build(
+                b3_info,
+                proto_query,
+                fs_overrides,
+                "debug_scored_posts",
+                RequestType::ScoredPosts,
+            )
             .await?;
         let RequestContext {
             b3_info,
@@ -281,7 +358,13 @@ impl pb::for_you_feed_service_server::ForYouFeedService for ForYouFeedServer {
             .ok_or_else(|| Status::invalid_argument("query must be specified"))?;
         let ctx = self
             .query_builder
-            .build(b3_info, proto_query, Default::default(), "for_you_feed")
+            .build(
+                b3_info,
+                proto_query,
+                Default::default(),
+                "for_you_feed",
+                RequestType::ForYou,
+            )
             .await?;
         let RequestContext {
             b3_info,
@@ -312,7 +395,107 @@ impl pb::for_you_feed_service_server::ForYouFeedService for ForYouFeedServer {
         let is_polling = proto_query.is_polling;
         let ctx = self
             .query_builder
-            .build(b3_info, proto_query, Default::default(), "for_you_feed_urt")
+            .build(
+                b3_info,
+                proto_query,
+                Default::default(),
+                "for_you_feed_urt",
+                RequestType::ForYou,
+            )
+            .await?;
+        let RequestContext {
+            b3_info,
+            mut query,
+            root_span,
+        } = ctx;
+
+        query.request_context = request_context;
+        query.is_polling = is_polling;
+        if !cursor_str.is_empty() {
+            match cursor_utils::decode_ordered_cursor(&cursor_str) {
+                Ok(Some(c)) => {
+                    query.is_bottom_request = c.cursor_type == Some(CursorType::BOTTOM);
+                    query.is_top_request = c.cursor_type == Some(CursorType::TOP);
+                    query.cursor = Some(c);
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!(cursor_str, error = %e, "failed to decode URT cursor, ignoring");
+                }
+            }
+        }
+        let urt = self
+            .get_for_you_feed_urt(query)
+            .instrument(root_span)
+            .await?;
+
+        let mut response = Response::new(ForYouFeedUrtResponse { urt: urt.into() });
+        b3_info.inject_trace_response_header(&mut response);
+        Ok(response)
+    }
+
+    #[xai_stats_macro::receive_stats(latency=Bucket500To2500)]
+    async fn get_debug_for_you_feed(
+        &self,
+        request: Request<pb::DebugForYouFeedQuery>,
+    ) -> Result<Response<ForYouFeedResponse>, Status> {
+        let mut b3_info = extract_b3_info(request.metadata());
+        b3_info.force_sample();
+
+        let debug_query = request.into_inner();
+        let fs_overrides = debug_query.feature_switch_overrides;
+        let proto_query = debug_query
+            .query
+            .ok_or_else(|| Status::invalid_argument("query must be specified"))?;
+        let ctx = self
+            .query_builder
+            .build(
+                b3_info,
+                proto_query,
+                fs_overrides,
+                "debug_for_you_feed",
+                RequestType::ForYou,
+            )
+            .await?;
+        let RequestContext {
+            b3_info,
+            query,
+            root_span,
+        } = ctx;
+        let output = self.get_for_you_feed(query).instrument(root_span).await?;
+
+        let mut response = Response::new(ForYouFeedResponse {
+            items: output.items,
+        });
+        b3_info.inject_trace_response_header(&mut response);
+        Ok(response)
+    }
+
+    #[xai_stats_macro::receive_stats(latency=Bucket500To2500)]
+    async fn get_debug_for_you_feed_urt(
+        &self,
+        request: Request<pb::DebugForYouFeedQuery>,
+    ) -> Result<Response<ForYouFeedUrtResponse>, Status> {
+        let mut b3_info = extract_b3_info(request.metadata());
+        b3_info.force_sample();
+
+        let debug_query = request.into_inner();
+        let fs_overrides = debug_query.feature_switch_overrides;
+        let proto_query = debug_query
+            .query
+            .ok_or_else(|| Status::invalid_argument("query must be specified"))?;
+        let cursor_str = proto_query.cursor.clone();
+        let request_context = proto_query.request_context.clone();
+        let is_polling = proto_query.is_polling;
+        let ctx = self
+            .query_builder
+            .build(
+                b3_info,
+                proto_query,
+                fs_overrides,
+                "debug_for_you_feed_urt",
+                RequestType::ForYou,
+            )
             .await?;
         let RequestContext {
             b3_info,
@@ -347,6 +530,284 @@ impl pb::for_you_feed_service_server::ForYouFeedService for ForYouFeedServer {
 }
 
 #[tonic::async_trait]
+impl pb::ranked_following_feed_service_server::RankedFollowingFeedService
+    for RankedFollowingFeedServer
+{
+    #[xai_stats_macro::receive_stats(latency=Bucket500To2500)]
+    async fn get_ranked_following_feed_urt(
+        &self,
+        request: Request<pb::RankedFollowingFeedQuery>,
+    ) -> Result<Response<RankedFollowingFeedUrtResponse>, Status> {
+        let b3_info = extract_b3_info(request.metadata());
+        let feed_query = request.into_inner();
+        let proto_query = feed_query
+            .query
+            .ok_or_else(|| Status::invalid_argument("query must be specified"))?;
+        let cursor_str = proto_query.cursor.clone();
+        let request_context = proto_query.request_context.clone();
+        let is_polling = proto_query.is_polling;
+        let ctx = self
+            .query_builder
+            .build(
+                b3_info,
+                proto_query,
+                Default::default(),
+                "ranked_following_feed_urt",
+                RequestType::RankedFollowing,
+            )
+            .await?;
+        let RequestContext {
+            b3_info,
+            mut query,
+            root_span,
+        } = ctx;
+
+        query.in_network_only = true;
+        query.request_context = request_context;
+        query.is_polling = is_polling;
+        if !cursor_str.is_empty() {
+            match cursor_utils::decode_ordered_cursor(&cursor_str) {
+                Ok(Some(c)) => {
+                    query.is_bottom_request = c.cursor_type == Some(CursorType::BOTTOM);
+                    query.is_top_request = c.cursor_type == Some(CursorType::TOP);
+                    query.cursor = Some(c);
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!(cursor_str, error = %e, "failed to decode URT cursor, ignoring");
+                }
+            }
+        }
+        let urt = self
+            .get_ranked_following_feed_urt(query)
+            .instrument(root_span)
+            .await?;
+
+        let mut response = Response::new(RankedFollowingFeedUrtResponse { urt: urt.into() });
+        b3_info.inject_trace_response_header(&mut response);
+        Ok(response)
+    }
+
+    #[xai_stats_macro::receive_stats(latency=Bucket500To2500)]
+    async fn get_debug_ranked_following_feed(
+        &self,
+        request: Request<pb::DebugRankedFollowingFeedQuery>,
+    ) -> Result<Response<RankedFollowingFeedResponse>, Status> {
+        let mut b3_info = extract_b3_info(request.metadata());
+        b3_info.force_sample();
+
+        let debug_query = request.into_inner();
+        let fs_overrides = debug_query.feature_switch_overrides;
+        let proto_query = debug_query
+            .query
+            .ok_or_else(|| Status::invalid_argument("query must be specified"))?;
+        let ctx = self
+            .query_builder
+            .build(
+                b3_info,
+                proto_query,
+                fs_overrides,
+                "debug_ranked_following_feed",
+                RequestType::RankedFollowing,
+            )
+            .await?;
+        let RequestContext {
+            b3_info,
+            mut query,
+            root_span,
+        } = ctx;
+        query.in_network_only = true;
+        let output = self
+            .get_ranked_following_feed(query)
+            .instrument(root_span)
+            .await?;
+
+        let mut response = Response::new(RankedFollowingFeedResponse {
+            items: output.items,
+        });
+        b3_info.inject_trace_response_header(&mut response);
+        Ok(response)
+    }
+}
+
+#[tonic::async_trait]
+impl pb::following_feed_service_server::FollowingFeedService for FollowingFeedServer {
+    #[xai_stats_macro::receive_stats(latency=Bucket500To2500)]
+    async fn get_following_feed_urt(
+        &self,
+        request: Request<pb::FollowingFeedQuery>,
+    ) -> Result<Response<FollowingFeedUrtResponse>, Status> {
+        let b3_info = extract_b3_info(request.metadata());
+        let feed_query = request.into_inner();
+        let proto_query = feed_query
+            .query
+            .ok_or_else(|| Status::invalid_argument("query must be specified"))?;
+        let cursor_str = proto_query.cursor.clone();
+        let request_context = proto_query.request_context.clone();
+        let is_polling = proto_query.is_polling;
+        let ctx = self
+            .query_builder
+            .build(
+                b3_info,
+                proto_query,
+                Default::default(),
+                "following_feed_urt",
+                RequestType::Following,
+            )
+            .await?;
+        let RequestContext {
+            b3_info,
+            mut query,
+            root_span,
+        } = ctx;
+
+        query.in_network_only = true;
+        query.request_context = request_context;
+        query.is_polling = is_polling;
+        if !cursor_str.is_empty() {
+            match cursor_utils::decode_ordered_cursor(&cursor_str) {
+                Ok(Some(c)) => {
+                    query.is_bottom_request = c.cursor_type == Some(CursorType::BOTTOM);
+                    query.is_top_request = c.cursor_type == Some(CursorType::TOP);
+                    query.cursor = Some(c);
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!(cursor_str, error = %e, "failed to decode URT cursor, ignoring");
+                }
+            }
+        }
+        let urt = self
+            .get_following_feed_urt(query)
+            .instrument(root_span)
+            .await?;
+
+        let mut response = Response::new(FollowingFeedUrtResponse { urt: urt.into() });
+        b3_info.inject_trace_response_header(&mut response);
+        Ok(response)
+    }
+
+    #[xai_stats_macro::receive_stats(latency=Bucket500To2500)]
+    async fn get_debug_following_feed(
+        &self,
+        request: Request<pb::DebugFollowingFeedQuery>,
+    ) -> Result<Response<FollowingFeedResponse>, Status> {
+        let mut b3_info = extract_b3_info(request.metadata());
+        b3_info.force_sample();
+
+        let debug_query = request.into_inner();
+        let fs_overrides = debug_query.feature_switch_overrides;
+        let proto_query = debug_query
+            .query
+            .ok_or_else(|| Status::invalid_argument("query must be specified"))?;
+        let ctx = self
+            .query_builder
+            .build(
+                b3_info,
+                proto_query,
+                fs_overrides,
+                "debug_following_feed",
+                RequestType::Following,
+            )
+            .await?;
+        let RequestContext {
+            b3_info,
+            mut query,
+            root_span,
+        } = ctx;
+        query.in_network_only = true;
+        let output = self.get_following_feed(query).instrument(root_span).await?;
+
+        let mut response = Response::new(FollowingFeedResponse {
+            items: output.items,
+        });
+        b3_info.inject_trace_response_header(&mut response);
+        Ok(response)
+    }
+}
+
+#[tonic::async_trait]
+impl pb::phoenix_scores_service_server::PhoenixScoresService for PhoenixScoresServer {
+    #[xai_stats_macro::receive_stats(latency=Bucket500To1000)]
+    async fn get_phoenix_scores(
+        &self,
+        request: Request<pb::PhoenixScoresQuery>,
+    ) -> Result<Response<PhoenixScoresResponse>, Status> {
+        let b3_info = extract_b3_info(request.metadata());
+        let phoenix_scores_query = request.into_inner();
+        let candidate_tweet_ids = phoenix_scores_query.candidate_tweet_ids.clone();
+        let proto_query = build_query_builder_input(phoenix_scores_query);
+        let ctx = self
+            .query_builder
+            .build(
+                b3_info,
+                proto_query,
+                Default::default(),
+                "phoenix_scores",
+                RequestType::PhoenixScores,
+            )
+            .await?;
+        let RequestContext {
+            b3_info,
+            mut query,
+            root_span,
+        } = ctx;
+        query.seed_candidate_post_ids = candidate_tweet_ids;
+
+        let output = self.run_pipeline(query).instrument(root_span).await?;
+
+        let mut response = Response::new(PhoenixScoresResponse {
+            scores: output.scores,
+        });
+        b3_info.inject_trace_response_header(&mut response);
+        Ok(response)
+    }
+
+    #[xai_stats_macro::receive_stats(latency=Bucket500To1000)]
+    async fn get_debug_phoenix_scores(
+        &self,
+        request: Request<pb::DebugPhoenixScoresQuery>,
+    ) -> Result<Response<DebugPhoenixScoresResponse>, Status> {
+        let mut b3_info = extract_b3_info(request.metadata());
+        b3_info.force_sample();
+
+        let debug_query = request.into_inner();
+        let fs_overrides = debug_query.feature_switch_overrides;
+        let phoenix_scores_query = debug_query.query.unwrap_or_default();
+        let candidate_tweet_ids = phoenix_scores_query.candidate_tweet_ids.clone();
+        let proto_query = build_query_builder_input(phoenix_scores_query);
+
+        let ctx = self
+            .query_builder
+            .build(
+                b3_info,
+                proto_query,
+                fs_overrides,
+                "debug_phoenix_scores",
+                RequestType::PhoenixScores,
+            )
+            .await?;
+        let RequestContext {
+            b3_info,
+            mut query,
+            root_span,
+        } = ctx;
+        query.seed_candidate_post_ids = candidate_tweet_ids;
+
+        let output = self.run_pipeline(query).instrument(root_span).await?;
+
+        let debug_json = build_debug_json(&output.pipeline_result);
+
+        let mut response = Response::new(DebugPhoenixScoresResponse {
+            scores: output.scores,
+            debug_json,
+        });
+        b3_info.inject_trace_response_header(&mut response);
+        Ok(response)
+    }
+}
+
+#[tonic::async_trait]
 impl xai_x_service_builder::XService for HomeMixerServer {
     type Config = HomeMixerConfig;
 
@@ -358,14 +819,52 @@ impl xai_x_service_builder::XService for HomeMixerServer {
             config,
         } = ctx;
 
-        let gizmoduck_client: Arc<dyn GizmoduckClient + Send + Sync> = Arc::new(
-            ProdGizmoduckClient::new(
-                config.shard_coordinate,
-                &datacenter,
-                Some("home-mixer.prod".to_string()),
-            )
-            .await
-            .expect("Failed to create Gizmoduck client"),
+        let (
+            gizmoduck_client,
+            resurrection_date_client,
+            phoenix_candidate_pipeline,
+            phoenix_scores_pipeline,
+        ) = tokio::join!(
+            async {
+                Arc::new(
+                    ProdGizmoduckClient::new(
+                        config.shard_coordinate,
+                        &datacenter,
+                        Some("home-mixer.prod".to_string()),
+                    )
+                    .await
+                    .expect("Failed to create Gizmoduck client"),
+                ) as Arc<dyn GizmoduckClient + Send + Sync>
+            },
+            async {
+                Arc::new(
+                    ProdResurrectionDateClient::new(&datacenter)
+                        .await
+                        .expect("Failed to create ResurrectionDate client"),
+                ) as Arc<dyn ResurrectionDateClient>
+            },
+            async {
+                Arc::new(
+                    PhoenixCandidatePipeline::prod(
+                        config.shard_coordinate,
+                        &datacenter,
+                        feature_switches.clone(),
+                        &config.phoenix_xds,
+                        &config.vm_ranker_xds,
+                    )
+                    .await,
+                )
+            },
+            async {
+                Arc::new(
+                    PhoenixScoresPipeline::prod(
+                        config.shard_coordinate,
+                        &datacenter,
+                        &config.phoenix_xds,
+                    )
+                    .await,
+                )
+            },
         );
 
         let query_builder = QueryBuilder {
@@ -373,24 +872,50 @@ impl xai_x_service_builder::XService for HomeMixerServer {
             decider,
             datacenter: datacenter.clone(),
             gizmoduck_client,
+            resurrection_date_client,
         };
-
-        let phoenix_candidate_pipeline =
-            Arc::new(PhoenixCandidatePipeline::prod(config.shard_coordinate, &datacenter).await);
 
         let scored_posts = Arc::new(ScoredPostsServer::new(
             query_builder.clone(),
             phoenix_candidate_pipeline,
         ));
 
-        let for_you_pipeline =
-            ForYouCandidatePipeline::new(Arc::clone(&scored_posts), &datacenter).await;
+        let (for_you_pipeline, ranked_following_pipeline, following_pipeline) = tokio::join!(
+            ForYouCandidatePipeline::new(
+                Arc::clone(&scored_posts),
+                config.shard_coordinate,
+                &datacenter,
+            ),
+            RankedFollowingCandidatePipeline::new(Arc::clone(&scored_posts), &datacenter),
+            FollowingCandidatePipeline::new(&datacenter),
+        );
 
-        let for_you = Arc::new(ForYouFeedServer::new(query_builder, for_you_pipeline));
+        let for_you = Arc::new(ForYouFeedServer::new(
+            query_builder.clone(),
+            for_you_pipeline,
+        ));
+
+        let ranked_following = Arc::new(RankedFollowingFeedServer::new(
+            query_builder.clone(),
+            ranked_following_pipeline,
+        ));
+
+        let following = Arc::new(FollowingFeedServer::new(
+            query_builder.clone(),
+            following_pipeline,
+        ));
+
+        let phoenix_scores = Arc::new(PhoenixScoresServer::new(
+            phoenix_scores_pipeline,
+            query_builder,
+        ));
 
         HomeMixerServer {
             scored_posts,
             for_you,
+            ranked_following,
+            following,
+            phoenix_scores,
         }
     }
 
@@ -409,6 +934,39 @@ impl xai_x_service_builder::XService for HomeMixerServer {
         routes.add_service(
             pb::for_you_feed_service_server::ForYouFeedServiceServer::from_arc(Arc::clone(
                 &self.for_you,
+            ))
+            .max_decoding_message_size(params::MAX_GRPC_MESSAGE_SIZE)
+            .max_encoding_message_size(params::MAX_GRPC_MESSAGE_SIZE)
+            .accept_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Zstd)
+            .send_compressed(CompressionEncoding::Gzip)
+            .send_compressed(CompressionEncoding::Zstd),
+        );
+        routes.add_service(
+            pb::ranked_following_feed_service_server::RankedFollowingFeedServiceServer::from_arc(
+                Arc::clone(&self.ranked_following),
+            )
+            .max_decoding_message_size(params::MAX_GRPC_MESSAGE_SIZE)
+            .max_encoding_message_size(params::MAX_GRPC_MESSAGE_SIZE)
+            .accept_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Zstd)
+            .send_compressed(CompressionEncoding::Gzip)
+            .send_compressed(CompressionEncoding::Zstd),
+        );
+        routes.add_service(
+            pb::following_feed_service_server::FollowingFeedServiceServer::from_arc(Arc::clone(
+                &self.following,
+            ))
+            .max_decoding_message_size(params::MAX_GRPC_MESSAGE_SIZE)
+            .max_encoding_message_size(params::MAX_GRPC_MESSAGE_SIZE)
+            .accept_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Zstd)
+            .send_compressed(CompressionEncoding::Gzip)
+            .send_compressed(CompressionEncoding::Zstd),
+        );
+        routes.add_service(
+            pb::phoenix_scores_service_server::PhoenixScoresServiceServer::from_arc(Arc::clone(
+                &self.phoenix_scores,
             ))
             .max_decoding_message_size(params::MAX_GRPC_MESSAGE_SIZE)
             .max_encoding_message_size(params::MAX_GRPC_MESSAGE_SIZE)

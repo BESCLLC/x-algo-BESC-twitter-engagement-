@@ -19,7 +19,7 @@ impl TweetTypeMetricsHydrator {
         Self
     }
 
-    pub fn create_tweet_type_bitset(
+        pub fn create_tweet_type_bitset(
         candidate: &PostCandidate,
         query: &ScoredPostsQuery,
     ) -> HashSet<usize> {
@@ -132,7 +132,7 @@ impl TweetTypeMetricsHydrator {
         true_tweet_types
     }
 
-    pub fn bitset_to_bytes(bits: &HashSet<usize>) -> Vec<u8> {
+        pub fn bitset_to_bytes(bits: &HashSet<usize>) -> Vec<u8> {
         if bits.is_empty() {
             return Vec::new();
         }
@@ -176,5 +176,72 @@ impl Hydrator<ScoredPostsQuery, PostCandidate> for TweetTypeMetricsHydrator {
 
     fn update(&self, candidate: &mut PostCandidate, hydrated: PostCandidate) {
         candidate.tweet_type_metrics = hydrated.tweet_type_metrics;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::candidate::PostCandidate;
+    use crate::models::query::ScoredPostsQuery;
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_bitset_to_bytes_empty() {
+        let bits = HashSet::new();
+        let bytes = TweetTypeMetricsHydrator::bitset_to_bytes(&bits);
+        assert_eq!(bytes, Vec::<u8>::new());
+    }
+
+    #[test]
+    fn test_bitset_to_bytes_multiple_bits_same_byte() {
+        let mut bits = HashSet::new();
+        bits.insert(0);
+        bits.insert(2);
+        bits.insert(7);
+        let bytes = TweetTypeMetricsHydrator::bitset_to_bytes(&bits);
+        assert_eq!(bytes, vec![0b10000101]);
+    }
+
+    #[test]
+    fn test_bitset_to_bytes_multiple_bytes() {
+        let mut bits = HashSet::new();
+        bits.insert(0); 
+        bits.insert(8); 
+        bits.insert(15); 
+        let bytes = TweetTypeMetricsHydrator::bitset_to_bytes(&bits);
+        assert_eq!(bytes, vec![0b00000001, 0b10000001]);
+    }
+
+    #[test]
+    fn test_bitset_to_bytes_large_bit_index() {
+        let mut bits = HashSet::new();
+        bits.insert(314); 
+        let bytes = TweetTypeMetricsHydrator::bitset_to_bytes(&bits);
+        assert_eq!(bytes.len(), 40);
+        assert_eq!(bytes[39], 0b00000100); 
+    }
+
+    #[tokio::test]
+    async fn test_hydrate_multiple_candidates() {
+        let hydrator = TweetTypeMetricsHydrator::new();
+        let candidates = vec![
+            PostCandidate {
+                tweet_id: 1234567890123456789,
+                retweeted_tweet_id: Some(456),
+                ..Default::default()
+            },
+            PostCandidate {
+                tweet_id: 1234567890123456790,
+                in_reply_to_tweet_id: Some(789),
+                ..Default::default()
+            },
+        ];
+        let query = ScoredPostsQuery::default();
+
+        let hydrated = hydrator.hydrate(&query, &candidates).await;
+        assert_eq!(hydrated.len(), 2);
+        assert!(hydrated[0].as_ref().unwrap().tweet_type_metrics.is_some());
+        assert!(hydrated[1].as_ref().unwrap().tweet_type_metrics.is_some());
     }
 }

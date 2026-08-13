@@ -3,7 +3,7 @@ use crate::scored_posts_server::ScoredPostsServer;
 use std::sync::Arc;
 use tonic::async_trait;
 use xai_candidate_pipeline::source::Source;
-use xai_home_mixer_proto::{FeedItem, feed_item};
+use xai_home_mixer_proto::{feed_item, FeedItem};
 
 pub struct ScoredPostsSource {
     pub scored_posts_server: Arc<ScoredPostsServer>,

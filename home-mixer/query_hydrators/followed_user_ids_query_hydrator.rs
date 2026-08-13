@@ -11,6 +11,10 @@ pub struct FollowedUserIdsQueryHydrator {
 
 #[async_trait]
 impl QueryHydrator<ScoredPostsQuery> for FollowedUserIdsQueryHydrator {
+    fn enable(&self, query: &ScoredPostsQuery) -> bool {
+        query.user_features.followed_user_ids.is_empty()
+    }
+
     async fn hydrate(&self, query: &ScoredPostsQuery) -> Result<ScoredPostsQuery, String> {
         let followed_user_ids = self
             .socialgraph_client

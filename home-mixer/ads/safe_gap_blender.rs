@@ -1,13 +1,24 @@
-use super::AdsBlender;
 use super::util::*;
+use super::AdsBlender;
+use crate::params::RESULT_SIZE;
 use xai_home_mixer_proto::{FeedItem, ScoredPost};
 use xai_recsys_proto::AdIndexInfo;
 
-pub struct SafeGapAdsBlender;
+pub struct SafeGapAdsBlender {
+    pub(crate) result_size: usize,
+}
+
+impl Default for SafeGapAdsBlender {
+    fn default() -> Self {
+        Self {
+            result_size: RESULT_SIZE,
+        }
+    }
+}
 
 impl AdsBlender for SafeGapAdsBlender {
     fn blend_inner(&self, scored_posts: Vec<ScoredPost>, ads: Vec<AdIndexInfo>) -> Vec<FeedItem> {
-        blend_impl(scored_posts, ads, MIN_POSTS_FOR_ADS)
+        blend_impl(scored_posts, ads, MIN_POSTS_FOR_ADS, self.result_size)
     }
 }
 
@@ -15,6 +26,7 @@ pub(crate) fn blend_impl(
     scored_posts: Vec<ScoredPost>,
     ads: Vec<AdIndexInfo>,
     min_posts: usize,
+    result_size: usize,
 ) -> Vec<FeedItem> {
     let n = scored_posts.len();
 
@@ -27,7 +39,7 @@ pub(crate) fn blend_impl(
     let first_ideal = ads[0].insert_position.max(0) as usize;
     let placements = assign_ads_to_gaps(&safe_gaps, ads.len(), &spacing, first_ideal);
 
-    interleave_and_finalize(scored_posts, ads, &placements)
+    interleave_and_finalize(scored_posts, ads, &placements, result_size)
 }
 
 pub(crate) fn assign_ads_to_gaps(

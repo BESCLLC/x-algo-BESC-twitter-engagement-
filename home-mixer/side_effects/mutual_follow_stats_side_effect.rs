@@ -7,7 +7,7 @@ use crate::params::{
 use std::sync::Arc;
 use tonic::async_trait;
 use xai_candidate_pipeline::side_effect::{SideEffect, SideEffectInput};
-use xai_stats_receiver::{HistogramBuckets, global_stats_receiver};
+use xai_stats_receiver::{global_stats_receiver, HistogramBuckets};
 
 const METRIC_PREFIX: &str = "MutualFollowJaccard";
 

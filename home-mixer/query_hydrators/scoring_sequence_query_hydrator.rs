@@ -1,16 +1,17 @@
 use crate::clients::user_action_aggregation_client::{
     UserActionAggregationClient, UserActionsCluster,
 };
-use crate::models::query::ScoredPostsQuery;
+use crate::models::query::{RequestType, ScoredPostsQuery};
 use crate::params::{
-    self as p, IncludeRealtimeActions, MaxSeqLengthScoring, PhoenixAggregationType,
+    self as p, EnableScoringSequenceHydration, MaxSeqLengthScoring, PhoenixAggregationType,
     UasSourceDataType, UseXdsForUas, UserActionsClusterId,
 };
 use std::sync::Arc;
 use tonic::async_trait;
+use xai_candidate_pipeline::component_library::utils::is_prod;
 use xai_candidate_pipeline::query_hydrator::QueryHydrator;
 use xai_recsys_proto::{
-    ResponseFormat, UserActionAggregationType, UserActionSequenceSourceDataType,
+    ResponseFormat, UaasModelType, UserActionAggregationType, UserActionSequenceSourceDataType,
 };
 
 pub struct ScoringSequenceQueryHydrator {
@@ -29,13 +30,18 @@ impl ScoringSequenceQueryHydrator {
 
 #[async_trait]
 impl QueryHydrator<ScoredPostsQuery> for ScoringSequenceQueryHydrator {
+    fn enable(&self, query: &ScoredPostsQuery) -> bool {
+        query.params.get(EnableScoringSequenceHydration)
+    }
+
     async fn hydrate(&self, query: &ScoredPostsQuery) -> Result<ScoredPostsQuery, String> {
         let cluster = UserActionsCluster::parse(&query.params.get(UserActionsClusterId));
-        let include_realtime: bool = query.params.get(IncludeRealtimeActions);
         let source_data_type =
             UserActionSequenceSourceDataType::from_str_name(&query.params.get(UasSourceDataType))
                 .unwrap_or(UserActionSequenceSourceDataType::Arrow);
         let use_xds: bool = query.params.get(UseXdsForUas);
+        let request_id = (is_prod() && query.request_type != RequestType::PhoenixScores)
+            .then_some(query.prediction_id as i64);
         let result = self
             .user_action_aggregation_client
             .fetch_aggregated_sequence(
@@ -44,12 +50,12 @@ impl QueryHydrator<ScoredPostsQuery> for ScoringSequenceQueryHydrator {
                 p::UAS_WINDOW_TIME_MS as u32,
                 query.params.get(MaxSeqLengthScoring),
                 UserActionAggregationType::from_str_name(&query.params.get(PhoenixAggregationType))
-                    .unwrap_or(UserActionAggregationType::DenseWithNotInterestedIn),
+                    .unwrap_or(UserActionAggregationType::DenseWithFavVqvCleaned),
                 source_data_type,
                 ResponseFormat::Arrow,
-                if include_realtime { Some(true) } else { None },
-                Some(query.prediction_id as i64),
+                request_id,
                 use_xds,
+                UaasModelType::Ranking,
             )
             .await
             .map_err(|e| format!("Aggregation service call failed: {}", e))?;

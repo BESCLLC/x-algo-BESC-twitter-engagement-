@@ -116,3 +116,48 @@ impl Hydrator<ScoredPostsQuery, PostCandidate> for MutualFollowJaccardHydrator {
         candidate.mutual_follow_jaccard = hydrated.mutual_follow_jaccard;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identical_signatures_yield_1() {
+        let sig: Vec<i64> = (0..MIN_HASHES as i64).collect();
+        assert!((jaccard_from_minhash(&sig, &sig) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn completely_different_signatures_yield_0() {
+        let a: Vec<i64> = (0..MIN_HASHES as i64).collect();
+        let b: Vec<i64> = (MIN_HASHES as i64..2 * MIN_HASHES as i64).collect();
+        assert!((jaccard_from_minhash(&a, &b)).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn empty_signatures_yield_0() {
+        assert!((jaccard_from_minhash(&[], &[])).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn partial_overlap() {
+        let a: Vec<i64> = (0..MIN_HASHES as i64).collect();
+        let mut b = a.clone();
+        for i in MIN_HASHES / 2..MIN_HASHES {
+            b[i] = a[i] + 1000;
+        }
+        let j = jaccard_from_minhash(&a, &b);
+        assert!((j - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn mixed_length_256_vs_1024_compares_shared_prefix() {
+        let short: Vec<i64> = (0..256_i64).collect();
+        let mut long: Vec<i64> = (0..1024_i64).collect();
+        for val in &mut long[256..1024] {
+            *val += 9999;
+        }
+        let j = jaccard_from_minhash(&short, &long);
+        assert!((j - 1.0).abs() < f64::EPSILON);
+    }
+}

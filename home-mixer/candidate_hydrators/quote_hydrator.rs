@@ -7,13 +7,13 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tonic::async_trait;
 use xai_candidate_pipeline::component_library::clients::SocialGraphClientOps;
-use xai_candidate_pipeline::component_library::utils::{MokaCache, default_moka_cache};
+use xai_candidate_pipeline::component_library::utils::{default_quick_cache, QuickCache};
 use xai_candidate_pipeline::hydrator::{CacheStore, Hydrator};
 
 pub struct QuoteHydrator {
     pub tes_client: Arc<dyn TESClient + Send + Sync>,
     pub socialgraph_client: Arc<dyn SocialGraphClientOps>,
-    pub cache: MokaCache<u64, QuoteCacheValue>,
+    pub cache: QuickCache<u64, QuoteCacheValue>,
 }
 
 impl QuoteHydrator {
@@ -21,7 +21,7 @@ impl QuoteHydrator {
         tes_client: Arc<dyn TESClient + Send + Sync>,
         socialgraph_client: Arc<dyn SocialGraphClientOps>,
     ) -> Self {
-        let cache = default_moka_cache();
+        let cache = default_quick_cache();
         Self {
             tes_client,
             socialgraph_client,

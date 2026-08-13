@@ -1,15 +1,15 @@
-use crate::clients::kafka_publisher_client::{
-    KafkaCluster, KafkaPublisherClient, ProdKafkaPublisherClient, SERVED_CANDIDATES_TOPIC,
-};
-use crate::models::query::ScoredPostsQuery;
+use crate::models::query::{RequestType, ScoredPostsQuery};
 use crate::params::EnableUrtMigrationComponents;
 use std::sync::Arc;
 use thrift::OrderedFloat;
 use tonic::async_trait;
+use xai_candidate_pipeline::component_library::clients::kafka_publisher_client::{
+    KafkaCluster, KafkaPublisherClient, ProdKafkaPublisherClient, SERVED_CANDIDATES_TOPIC,
+};
 use xai_candidate_pipeline::component_library::utils::client_utils::RequestContext;
 use xai_candidate_pipeline::component_library::utils::is_prod;
 use xai_candidate_pipeline::side_effect::{SideEffect, SideEffectInput};
-use xai_home_mixer_proto::{FeedItem, feed_item};
+use xai_home_mixer_proto::{feed_item, FeedItem};
 use xai_x_thrift::serialize_compact;
 use xai_x_thrift::timeline_logging::{
     EntryInfo, EntryType, ItemDetails, PromotedTweetDetails, QueryType, RequestInfo,
@@ -70,12 +70,18 @@ impl SideEffect<ScoredPostsQuery, FeedItem> for ServedCandidatesKafkaSideEffect 
             Some(Box::new(QueryType::OTHER))
         };
 
+        let timeline_type = match query.request_type {
+            RequestType::RankedFollowing => TimelineType::HOME_RANKED_FOLLOWING,
+            RequestType::Following => TimelineType::HOME_LATEST,
+            _ => TimelineType::HOME,
+        };
+
         let request_info = Box::new(RequestInfo {
             request_time_ms: now_ms,
             trace_id: query.request_id as i64,
             user_id: Some(query.user_id as i64),
             client_app_id: Some(query.client_app_id as i64),
-            timeline_type: Some(Box::new(TimelineType::HOME)),
+            timeline_type: Some(Box::new(timeline_type)),
             ip_address: Some(query.ip_address.clone()),
             user_agent: Some(query.user_agent.clone()),
             query_type,
@@ -202,6 +208,8 @@ fn build_entry_info(item: &FeedItem) -> Option<EntryInfo> {
             details: None,
             prediction_scores: None,
         }),
+        Some(feed_item::Item::Frame(_)) => None,
+        Some(feed_item::Item::FeedSurvey(_)) => None,
         None => None,
     }
 }

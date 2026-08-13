@@ -1,12 +1,13 @@
-
-use crate::clients::kafka_publisher_client::KafkaPublisherClient;
 use crate::models::candidate::PostCandidate;
 use crate::models::query::ScoredPostsQuery;
+use crate::params::ValueModelMode;
+use crate::scorers::ranking_scorer::ScoringWeights;
 use prost::Message;
 use rand::random;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tonic::async_trait;
+use xai_candidate_pipeline::component_library::clients::kafka_publisher_client::KafkaPublisherClient;
 use xai_candidate_pipeline::component_library::utils::is_prod;
 use xai_candidate_pipeline::side_effect::{SideEffect, SideEffectInput};
 use xai_home_mixer_proto as pb;
@@ -83,6 +84,8 @@ impl SideEffect<ScoredPostsQuery, PostCandidate> for RerankingKafkaSideEffect {
             total_candidates_count: Some(total_count),
             request_join_id: Some(input.query.request_id),
             product_surface: product_surface.into(),
+            applied_weights: ScoringWeights::from_params(&input.query.params).applied_weights_map(),
+            value_model_mode: Some(input.query.params.get(ValueModelMode)),
         };
 
         let bytes = batch.encode_to_vec();
@@ -101,7 +104,9 @@ fn build_scored_candidate(candidate: &PostCandidate, position: i32) -> pb::Score
     insert_score(&mut prediction_scores, "reply", s.reply_score);
     insert_score(&mut prediction_scores, "retweet", s.retweet_score);
     insert_score(&mut prediction_scores, "photo_expand", s.photo_expand_score);
+    insert_score(&mut prediction_scores, "video_open", s.video_open_score);
     insert_score(&mut prediction_scores, "click", s.click_score);
+    insert_score(&mut prediction_scores, "open_link", s.open_link_score);
     insert_score(
         &mut prediction_scores,
         "profile_click",
@@ -132,7 +137,24 @@ fn build_scored_candidate(candidate: &PostCandidate, position: i32) -> pb::Score
     insert_score(&mut prediction_scores, "block_author", s.block_author_score);
     insert_score(&mut prediction_scores, "mute_author", s.mute_author_score);
     insert_score(&mut prediction_scores, "report", s.report_score);
+    insert_score(&mut prediction_scores, "not_dwelled", s.not_dwelled_score);
+    insert_score(
+        &mut prediction_scores,
+        "post_unexplored",
+        s.post_unexplored_score,
+    );
+    insert_score(&mut prediction_scores, "pdwell", s.post_unexplored_score);
     insert_score(&mut prediction_scores, "dwell_time", s.dwell_time);
+    insert_score(
+        &mut prediction_scores,
+        "click_dwell_time",
+        s.click_dwell_time,
+    );
+    insert_score(
+        &mut prediction_scores,
+        "active_secs_5m_residual_norm",
+        s.active_secs_5m_residual_norm,
+    );
 
     let source_tweet_id = candidate.retweeted_tweet_id.unwrap_or(candidate.tweet_id);
 
@@ -149,9 +171,105 @@ fn build_scored_candidate(candidate: &PostCandidate, position: i32) -> pb::Score
         is_cached: candidate.last_scored_at_ms.is_some(),
         in_network: candidate.in_network.unwrap_or(false),
         position,
+        is_mutual_follow_author: candidate.is_mutual_follow_author,
+        broadcast_is_live: candidate.broadcast_is_live,
+        video_duration_ms: candidate.min_video_duration_ms,
     }
 }
 
 fn insert_score(map: &mut HashMap<String, f64>, name: &str, value: Option<f64>) {
     map.insert(name.to_string(), value.unwrap_or(0.0));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::candidate::PhoenixScores;
+    use crate::params::{
+        BidirectionalFollowReplyWeightBoost, ContDwellTimeWeight, FavoriteWeight, NotDwelledWeight,
+        ReplyWeight, ReportWeight,
+    };
+
+    fn default_weights_map() -> HashMap<String, f64> {
+        ScoringWeights::from_params(&xai_feature_switches::Params::default()).applied_weights_map()
+    }
+
+    #[test]
+    fn applied_weights_match_param_defaults() {
+        let params = xai_feature_switches::Params::default();
+        let weights = default_weights_map();
+        assert_eq!(weights["favorite"], params.get(FavoriteWeight));
+        assert_eq!(weights["reply"], params.get(ReplyWeight));
+        assert_eq!(weights["dwell_time"], params.get(ContDwellTimeWeight));
+        assert_eq!(weights["not_dwelled"], params.get(NotDwelledWeight));
+        assert_eq!(weights["report"], params.get(ReportWeight));
+        assert_eq!(
+            weights["boost.bidirectional_follow_reply"],
+            params.get(BidirectionalFollowReplyWeightBoost)
+        );
+    }
+
+    #[test]
+    fn every_logged_head_has_an_applied_weight() {
+        let candidate = PostCandidate::default();
+        let scored = build_scored_candidate(&candidate, 0);
+        let weights = default_weights_map();
+
+        for head in scored.prediction_scores.keys() {
+            assert!(
+                weights.contains_key(head),
+                "logged head {head} has no applied weight entry"
+            );
+        }
+        for key in weights.keys() {
+            if key.starts_with("boost.") || key.starts_with("gate.") {
+                continue;
+            }
+            assert!(
+                scored.prediction_scores.contains_key(key),
+                "weight {key} has no logged prediction head"
+            );
+        }
+    }
+
+    #[test]
+    fn logs_previously_missing_heads() {
+        let candidate = PostCandidate {
+            phoenix_scores: PhoenixScores {
+                open_link_score: Some(0.3),
+                video_open_score: Some(0.2),
+                not_dwelled_score: Some(0.4),
+                post_unexplored_score: Some(0.5),
+                click_dwell_time: Some(1.5),
+                active_secs_5m_residual_norm: Some(0.6),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let scored = build_scored_candidate(&candidate, 0);
+        assert_eq!(scored.prediction_scores["open_link"], 0.3);
+        assert_eq!(scored.prediction_scores["video_open"], 0.2);
+        assert_eq!(scored.prediction_scores["not_dwelled"], 0.4);
+        assert_eq!(scored.prediction_scores["post_unexplored"], 0.5);
+        assert_eq!(scored.prediction_scores["click_dwell_time"], 1.5);
+        assert_eq!(
+            scored.prediction_scores["active_secs_5m_residual_norm"],
+            0.6
+        );
+    }
+
+    #[test]
+    fn passes_through_weight_context_fields() {
+        let candidate = PostCandidate {
+            is_mutual_follow_author: Some(true),
+            broadcast_is_live: Some(false),
+            min_video_duration_ms: Some(12_000),
+            ..Default::default()
+        };
+        let scored = build_scored_candidate(&candidate, 3);
+        assert_eq!(scored.is_mutual_follow_author, Some(true));
+        assert_eq!(scored.broadcast_is_live, Some(false));
+        assert_eq!(scored.video_duration_ms, Some(12_000));
+        assert_eq!(scored.position, 3);
+    }
 }

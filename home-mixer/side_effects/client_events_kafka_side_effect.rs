@@ -1,19 +1,19 @@
-use crate::clients::kafka_publisher_client::{
-    CLIENT_EVENT_TOPIC, KafkaCluster, KafkaPublisherClient, ProdKafkaPublisherClient,
-};
-use crate::models::query::ScoredPostsQuery;
+use crate::models::query::{RequestType, ScoredPostsQuery};
 use crate::params::EnableUrtMigrationComponents;
-use crate::util::tweet_type_metrics::{TWEET_TYPE_PREDICATES, VIDEO, bitset_get};
+use crate::util::tweet_type_metrics::{bitset_get, TWEET_TYPE_PREDICATES, VIDEO};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tonic::async_trait;
 
+use xai_candidate_pipeline::component_library::clients::kafka_publisher_client::{
+    KafkaCluster, KafkaPublisherClient, ProdKafkaPublisherClient, CLIENT_EVENT_TOPIC,
+};
 use xai_candidate_pipeline::component_library::utils::client_utils::{
     ClientPlatform, RequestContext,
 };
 use xai_candidate_pipeline::component_library::utils::is_prod;
 use xai_candidate_pipeline::side_effect::{SideEffect, SideEffectInput};
-use xai_home_mixer_proto::{FeedItem, ScoredPost, ServedType, feed_item};
+use xai_home_mixer_proto::{feed_item, FeedItem, ScoredPost, ServedType};
 use xai_x_thrift::log_event::{EventNamespace, LogBase, LogEvent};
 use xai_x_thrift::serialize_binary;
 
@@ -66,7 +66,7 @@ impl SideEffect<ScoredPostsQuery, FeedItem> for ClientEventsKafkaSideEffect {
         let base = ClientEventParams {
             query,
             client_name: ClientPlatform::from_app_id(query.client_app_id).client_name(),
-            section: "home",
+            section: section_for(query.request_type),
             component: None,
             element: None,
             action: "served_tweets",
@@ -98,6 +98,14 @@ impl SideEffect<ScoredPostsQuery, FeedItem> for ClientEventsKafkaSideEffect {
         }
 
         Ok(())
+    }
+}
+
+fn section_for(request_type: RequestType) -> &'static str {
+    match request_type {
+        RequestType::RankedFollowing => "ranked_following",
+        RequestType::Following => "latest",
+        _ => "home",
     }
 }
 
@@ -269,7 +277,6 @@ fn base_build_log_event(
         "home",
         p.section,
         component.as_deref().unwrap_or(""),
-        element.as_deref().unwrap_or(""),
         action,
     ]
     .join(":");

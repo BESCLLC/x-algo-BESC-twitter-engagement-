@@ -3,17 +3,17 @@ use crate::models::candidate::PostCandidate;
 use crate::models::query::ScoredPostsQuery;
 use std::sync::Arc;
 use tonic::async_trait;
-use xai_candidate_pipeline::component_library::utils::{MokaCache, default_moka_cache};
+use xai_candidate_pipeline::component_library::utils::{default_quick_cache, QuickCache};
 use xai_candidate_pipeline::hydrator::{CacheStore, CachedHydrator};
 
 pub struct SubscriptionHydrator {
     pub tes_client: Arc<dyn TESClient + Send + Sync>,
-    pub cache: MokaCache<u64, Option<u64>>,
+    pub cache: QuickCache<u64, Option<u64>>,
 }
 
 impl SubscriptionHydrator {
     pub async fn new(tes_client: Arc<dyn TESClient + Send + Sync>) -> Self {
-        let cache = default_moka_cache();
+        let cache = default_quick_cache();
         Self { tes_client, cache }
     }
 }

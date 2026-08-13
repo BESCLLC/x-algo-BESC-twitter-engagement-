@@ -1,7 +1,12 @@
 use crate::candidate_pipeline::{PipelineCandidate, PipelineQuery};
 use crate::util;
+use crate::SPAN_LEVEL;
 use std::any::type_name_of_val;
-use tracing::{Span, field::Empty};
+use tracing::{field::Empty, Span};
+use xai_stats_receiver::{global_stats_receiver, HistogramBuckets};
+
+const RESULT_SIZE_SCOPE: [(&str, &str); 1] = [("requests", "result_size")];
+const RESULT_EMPTY_SCOPE: [(&str, &str); 1] = [("requests", "result_empty")];
 
 pub struct SelectResult<C> {
     pub selected: Vec<C>,
@@ -23,13 +28,12 @@ where
     Q: PipelineQuery,
     C: PipelineCandidate,
 {
-    /// Decide if this selector should run for the given query
     fn enable(&self, _query: &Q) -> bool {
         true
     }
 
-    #[xai_stats_macro::receive_stats(latency=Bucket0To50, size=Bucket0To50)]
-    #[tracing::instrument(skip_all, name = "selector", fields(
+    #[xai_stats_macro::receive_stats(latency=Bucket0To50)]
+    #[tracing::instrument(level = SPAN_LEVEL, skip_all, name = "selector", fields(
         name = self.name(),
         input_count = candidates.len(),
         selected_count = Empty,
@@ -40,10 +44,17 @@ where
         let span = Span::current();
         span.record("selected_count", result.selected.len());
         span.record("non_selected_count", result.non_selected.len());
+        #[cfg(feature = "quiet-spans")]
+        tracing::info!(
+            component = self.name(),
+            selected_count = result.selected.len(),
+            non_selected_count = result.non_selected.len(),
+            "selector"
+        );
+        self.stat(&result);
         result
     }
 
-    // Returns (selected, non_selected).
     fn select(&self, _query: &Q, candidates: Vec<C>) -> SelectResult<C> {
         let mut sorted = self.sort(candidates);
         if let Some(limit) = self.size() {
@@ -60,10 +71,8 @@ where
         }
     }
 
-    /// Extract the score from a candidate to use for sorting.
     fn score(&self, candidate: &C) -> f64;
 
-    /// Sort candidates by their scores in descending order.
     fn sort(&self, candidates: Vec<C>) -> Vec<C> {
         let mut sorted = candidates;
         sorted.sort_by(|a, b| {
@@ -74,12 +83,27 @@ where
         sorted
     }
 
-    /// Optionally provide a size to select. Defaults to no truncation if not overridden.
     fn size(&self) -> Option<usize> {
         None
     }
 
     fn name(&self) -> &'static str {
         util::short_type_name(type_name_of_val(self))
+    }
+
+    fn stat(&self, result: &SelectResult<C>) {
+        if let Some(receiver) = global_stats_receiver() {
+            let metric_name = format!("{}.run", self.name());
+            let result_size = result.len() as f64;
+            receiver.observe(
+                metric_name.as_str(),
+                &RESULT_SIZE_SCOPE,
+                result_size,
+                HistogramBuckets::Bucket0To50,
+            );
+            if result_size == 0.0 {
+                receiver.incr(metric_name.as_str(), &RESULT_EMPTY_SCOPE, 1u64);
+            }
+        }
     }
 }

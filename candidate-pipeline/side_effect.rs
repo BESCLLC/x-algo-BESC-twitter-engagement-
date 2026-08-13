@@ -4,8 +4,6 @@ use std::any::type_name_of_val;
 use std::sync::Arc;
 use tonic::async_trait;
 
-// A side-effect is an action run that doesn't affect the pipeline result from being returned
-
 #[derive(Clone)]
 pub struct SideEffectInput<Q, C> {
     pub query: Arc<Q>,
@@ -19,7 +17,6 @@ where
     Q: PipelineQuery,
     C: PipelineCandidate,
 {
-    /// Decide if this side-effect should be run
     fn enable(&self, _query: Arc<Q>) -> bool {
         true
     }

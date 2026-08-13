@@ -1,7 +1,9 @@
 use crate::models::candidate::PostCandidate;
-use crate::models::in_network_reply::{InNetworkReplies, serialize_in_network_replies};
+use crate::models::engagement_signals::EngagementSignalsByType;
+use crate::models::in_network_reply::{serialize_in_network_replies, InNetworkReplies};
 use crate::models::user_features::UserFeatures;
 use serde::Serialize;
+use std::sync::{Arc, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use xai_candidate_pipeline::candidate_pipeline::PipelineQuery;
 use xai_core_entities::entities::SubscriptionLevel;
@@ -21,6 +23,22 @@ pub struct ImpressionBloomFilterEntry {
     pub false_positive_rate: f64,
 }
 
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Serialize, strum::Display)]
+pub enum RequestType {
+    #[default]
+    ForYou,
+    RankedFollowing,
+    Following,
+    ScoredPosts,
+    PhoenixScores,
+}
+
+#[derive(Clone, Default, Debug)]
+pub struct FollowingPaginationMeta {
+    pub response_truncated: bool,
+    pub bottom_tweet_id: Option<u64>,
+}
+
 #[derive(Clone, Default, Debug, Serialize)]
 pub struct ScoredPostsQuery {
     pub user_id: u64,
@@ -30,6 +48,7 @@ pub struct ScoredPostsQuery {
     pub seen_ids: Vec<u64>,
     pub served_ids: Vec<u64>,
     pub in_network_only: bool,
+    pub request_type: RequestType,
     pub is_bottom_request: bool,
     pub is_top_request: bool,
     #[serde(skip)]
@@ -54,7 +73,6 @@ pub struct ScoredPostsQuery {
     pub has_cached_posts: bool,
     pub topic_ids: Vec<i64>,
     pub excluded_topic_ids: Vec<i64>,
-    pub new_user_topic_ids: Vec<i64>,
     pub exclude_videos: bool,
     #[serde(serialize_with = "serialize_in_network_replies")]
     pub in_network_replies: InNetworkReplies,
@@ -69,15 +87,21 @@ pub struct ScoredPostsQuery {
     pub device_id: String,
     pub mobile_device_id: String,
     pub mobile_device_ad_id: String,
+    #[serde(skip)]
+    pub dsp_client_context: Option<xai_recsys_proto::DspClientContext>,
     pub user_demographics: Option<UserDemographics>,
     pub ip_location: Option<xai_geo_ip::LocationInfo>,
     pub user_age_in_years: Option<i32>,
+    pub resurrection_time_ms: Option<i64>,
     #[serde(serialize_with = "serialize_debug")]
     pub user_inferred_gender: Option<InferredGenderLabel>,
     pub user_inferred_gender_score: Option<f32>,
     pub followed_grok_topics: Option<[bool; 32]>,
-    pub inferred_grok_topics: Option<[bool; 32]>,
     pub followed_starter_packs: Option<[bool; 20]>,
+    pub explicit_engagement_signals: Option<EngagementSignalsByType>,
+    pub implicit_engagement_signals: Option<EngagementSignalsByType>,
+    #[serde(serialize_with = "serialize_debug")]
+    pub user_installed_apps: Option<Vec<bool>>,
     pub subscription_level: Option<SubscriptionLevel>,
     pub is_shadow_traffic: bool,
     pub is_preview: bool,
@@ -88,10 +112,14 @@ pub struct ScoredPostsQuery {
     #[serde(skip)]
     pub served_history: Vec<ServedHistory>,
     pub who_to_follow_eligible: bool,
+    pub feed_survey_eligible: bool,
     #[serde(serialize_with = "serialize_debug")]
     pub non_polling_timestamps: Option<NonPollingTimestamps>,
     pub impressed_post_ids: Vec<u64>,
     pub push_to_home_post_id: Option<u64>,
+    pub seed_candidate_post_ids: Vec<u64>,
+    #[serde(serialize_with = "serialize_debug")]
+    pub following_pagination_meta: Arc<OnceLock<FollowingPaginationMeta>>,
 }
 
 pub use xai_candidate_pipeline::component_library::clients::strato_client::UserDemographics;
@@ -138,6 +166,7 @@ impl ScoredPostsQuery {
             seen_ids,
             served_ids,
             in_network_only,
+            request_type: RequestType::ForYou,
             is_bottom_request,
             is_top_request: false,
             bloom_filter_entries: vec![],
@@ -160,7 +189,6 @@ impl ScoredPostsQuery {
             has_cached_posts: false,
             topic_ids,
             excluded_topic_ids,
-            new_user_topic_ids: vec![],
             exclude_videos,
             in_network_replies: Default::default(),
             viewer_minhash: None,
@@ -172,14 +200,18 @@ impl ScoredPostsQuery {
             device_id,
             mobile_device_id,
             mobile_device_ad_id,
+            dsp_client_context: None,
             user_demographics: None,
             ip_location: None,
             user_age_in_years: age_in_years,
+            resurrection_time_ms: None,
             user_inferred_gender: None,
             user_inferred_gender_score: None,
             followed_grok_topics: None,
-            inferred_grok_topics: None,
             followed_starter_packs: None,
+            explicit_engagement_signals: None,
+            implicit_engagement_signals: None,
+            user_installed_apps: None,
             subscription_level,
             is_shadow_traffic,
             is_preview,
@@ -188,9 +220,12 @@ impl ScoredPostsQuery {
             request_context: String::new(),
             served_history: vec![],
             who_to_follow_eligible: false,
+            feed_survey_eligible: false,
             non_polling_timestamps: None,
             impressed_post_ids: Vec::new(),
             push_to_home_post_id,
+            seed_candidate_post_ids: Vec::new(),
+            following_pagination_meta: Arc::new(OnceLock::new()),
         }
     }
 
@@ -204,10 +239,6 @@ impl ScoredPostsQuery {
 
     pub fn has_excluded_topics(&self) -> bool {
         !self.excluded_topic_ids.is_empty()
-    }
-
-    pub fn has_new_user_topic_ids(&self) -> bool {
-        !self.new_user_topic_ids.is_empty()
     }
 }
 

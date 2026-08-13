@@ -4,14 +4,20 @@ use crate::models::query::ScoredPostsQuery;
 use crate::params::{ThunderAlgorithm, ThunderClusterId, ThunderMaxResults};
 use std::sync::Arc;
 use tonic::async_trait;
-use xai_candidate_pipeline::component_library::clients::{ThunderClient, ThunderCluster};
+use xai_candidate_pipeline::component_library::clients::{
+    ThunderCapiClient, ThunderClient, ThunderCluster,
+};
+use xai_candidate_pipeline::component_library::utils::quality_factor;
 use xai_candidate_pipeline::source::Source;
 use xai_home_mixer_proto as pb;
-use xai_thunder_proto::GetInNetworkPostsRequest;
 use xai_thunder_proto::in_network_posts_service_client::InNetworkPostsServiceClient;
+use xai_thunder_proto::GetInNetworkPostsRequest;
+
+pub const THUNDER_CAPI_DECIDER: &str = "enable_thunder_capi_home_mixer";
 
 pub struct ThunderSource {
     pub thunder_client: Arc<ThunderClient>,
+    pub thunder_capi_client: Option<Arc<dyn ThunderCapiClient + Send + Sync>>,
 }
 
 #[async_trait]
@@ -21,33 +27,47 @@ impl Source<ScoredPostsQuery, PostCandidate> for ThunderSource {
     }
 
     async fn source(&self, query: &ScoredPostsQuery) -> Result<Vec<PostCandidate>, String> {
-        let configured = ThunderCluster::parse(&query.params.get(ThunderClusterId));
-        let cluster = ThunderCluster::resolve(configured, query.decider.as_ref());
-        let channel = self
-            .thunder_client
-            .get_random_channel(cluster)
-            .ok_or_else(|| "ThunderSource: no available channel".to_string())?;
-
-        let mut client = InNetworkPostsServiceClient::new(channel.clone());
         let following_list = &query.user_features.followed_user_ids;
         let excluded_ids = query.seen_ids.to_vec();
+        let following_user_ids: Vec<u64> = following_list.iter().map(|&id| id as u64).collect();
 
         let request = GetInNetworkPostsRequest {
             user_id: query.user_id,
-            following_user_ids: following_list.iter().map(|&id| id as u64).collect(),
-            max_results: query.params.get(ThunderMaxResults),
+            following_user_ids,
+            max_results: quality_factor::apply(query.params.get(ThunderMaxResults)),
             exclude_tweet_ids: excluded_ids,
             algorithm: query.params.get(ThunderAlgorithm),
             debug: false,
             is_video_request: false,
         };
 
-        let response = client
-            .get_in_network_posts(request)
-            .await
-            .map_err(|e| format!("ThunderSource: {}", e))?;
+        let capi = self.thunder_capi_client.as_ref().filter(|_| {
+            query
+                .decider
+                .as_ref()
+                .is_some_and(|d| d.enabled(THUNDER_CAPI_DECIDER))
+        });
+        let posts = if let Some(capi) = capi {
+            capi.get_in_network_posts(request)
+                .await
+                .map_err(|e| format!("ThunderSource(capi): {e}"))?
+                .posts
+        } else {
+            let configured = ThunderCluster::parse(&query.params.get(ThunderClusterId));
+            let cluster = ThunderCluster::resolve(configured, query.decider.as_ref());
+            let channel = self
+                .thunder_client
+                .get_random_channel(cluster)
+                .ok_or_else(|| "ThunderSource: no available channel".to_string())?;
 
-        let posts = response.into_inner().posts;
+            let mut client = InNetworkPostsServiceClient::new(channel.clone());
+            client
+                .get_in_network_posts(request)
+                .await
+                .map_err(|e| format!("ThunderSource: {}", e))?
+                .into_inner()
+                .posts
+        };
 
         let replies: Vec<InNetworkReply> = posts
             .iter()

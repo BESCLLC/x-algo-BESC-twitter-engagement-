@@ -1,17 +1,18 @@
 use crate::models::candidate::PostCandidate;
-use crate::models::query::ScoredPostsQuery;
+use crate::models::query::{RequestType, ScoredPostsQuery};
 use crate::params::{
     EnablePhoenixRetrievalStatsExperimentBucket, PhoenixRetrievalInferenceClusterId,
-    PhoenixRetrievalMOEInferenceClusterId,
+    PhoenixRetrievalMOEInferenceClusterId, TRACE_USER_IDS,
 };
 
 use rand::random;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tonic::async_trait;
 use xai_candidate_pipeline::side_effect::{SideEffect, SideEffectInput};
 use xai_feature_switches::ExperimentBucket;
 use xai_home_mixer_proto::ServedType;
-use xai_stats_receiver::{HistogramBuckets, StatsReceiverExt, global_stats_receiver};
+use xai_stats_receiver::{global_stats_receiver, HistogramBuckets, StatsReceiverExt};
 
 const METRIC_PREFIX: &str = "ScoredStats";
 
@@ -38,10 +39,24 @@ impl SideEffect<ScoredPostsQuery, PostCandidate> for ScoredStatsSideEffect {
             return Ok(());
         };
 
+        record_trace_author_served_by_type(
+            receiver.as_ref(),
+            &input.selected_candidates,
+            input.query.request_type,
+        );
+
+        record_trace_author_score_distributions(
+            receiver.as_ref(),
+            &input.selected_candidates,
+            &input.non_selected_candidates,
+        );
+
         let candidates = &input.selected_candidates;
         if candidates.is_empty() {
             return Ok(());
         }
+
+        record_served_by_source(receiver.as_ref(), candidates);
 
         if !input.query.has_cached_posts {
             let retrieval_cluster: String =
@@ -56,7 +71,7 @@ impl SideEffect<ScoredPostsQuery, PostCandidate> for ScoredStatsSideEffect {
                 .experiment_buckets(EnablePhoenixRetrievalStatsExperimentBucket);
 
             if !experiment_buckets.is_empty() || random::<f64>() < DEFAULT_SAMPLING_RATE {
-                record_score_distributions(receiver.as_ref(), candidates);
+                record_score_distributions(receiver.as_ref(), "score", candidates.iter());
                 record_phoenix_retrieval_stats(
                     receiver.as_ref(),
                     &input.selected_candidates,
@@ -74,7 +89,7 @@ impl SideEffect<ScoredPostsQuery, PostCandidate> for ScoredStatsSideEffect {
             }
         } else {
             if random::<f64>() < DEFAULT_SAMPLING_RATE {
-                record_score_distributions(receiver.as_ref(), candidates);
+                record_score_distributions(receiver.as_ref(), "score", candidates.iter());
             }
         }
 
@@ -82,20 +97,51 @@ impl SideEffect<ScoredPostsQuery, PostCandidate> for ScoredStatsSideEffect {
     }
 }
 
+fn record_served_by_source(receiver: &dyn StatsReceiverExt, selected_candidates: &[PostCandidate]) {
+    let mut counts: HashMap<&'static str, u64> = HashMap::new();
+    for candidate in selected_candidates {
+        let served_type = candidate
+            .served_type
+            .unwrap_or(ServedType::Undefined)
+            .as_str_name();
+        *counts.entry(served_type).or_insert(0) += 1;
+    }
+    let key = format!("{METRIC_PREFIX}.ServedBySource");
+    for (served_type, count) in counts {
+        receiver.incr(
+            &key,
+            &[("type", "sum"), ("served_type", served_type)],
+            count,
+        );
+    }
+    receiver.incr(&key, &[("type", "requests")], 1);
+}
+
 fn record_head(
     receiver: &dyn StatsReceiverExt,
+    metric: &str,
     name: &str,
     scores: impl Iterator<Item = Option<f64>>,
 ) {
-    let distribution_key = format!("{METRIC_PREFIX}.scoreDistribution.{name}");
-    let missing_key = format!("{METRIC_PREFIX}.scoreMissing.{name}");
+    record_head_with_buckets(receiver, metric, name, scores, HistogramBuckets::Bucket0To1);
+}
+
+fn record_head_with_buckets(
+    receiver: &dyn StatsReceiverExt,
+    metric: &str,
+    name: &str,
+    scores: impl Iterator<Item = Option<f64>>,
+    buckets: HistogramBuckets,
+) {
+    let distribution_key = format!("{METRIC_PREFIX}.{metric}Distribution.{name}");
+    let missing_key = format!("{METRIC_PREFIX}.{metric}Missing.{name}");
     let mut present = 0u64;
     let mut missing = 0u64;
     for score in scores {
         match score {
             Some(value) => {
                 present += 1;
-                receiver.observe(&distribution_key, &[], value, HistogramBuckets::Bucket0To1);
+                receiver.observe(&distribution_key, &[], value, buckets);
             }
             None => {
                 missing += 1;
@@ -106,50 +152,158 @@ fn record_head(
     receiver.incr(&missing_key, &MISSING_SCOPE, missing);
 }
 
-fn record_score_distributions(receiver: &dyn StatsReceiverExt, candidates: &[PostCandidate]) {
+fn record_score_distributions<'a>(
+    receiver: &dyn StatsReceiverExt,
+    metric: &str,
+    candidates: impl Iterator<Item = &'a PostCandidate> + Clone,
+) {
     record_head(
         receiver,
+        metric,
         "favorite",
-        candidates.iter().map(|c| c.phoenix_scores.favorite_score),
+        candidates.clone().map(|c| c.phoenix_scores.favorite_score),
     );
     record_head(
         receiver,
+        metric,
         "reply",
-        candidates.iter().map(|c| c.phoenix_scores.reply_score),
+        candidates.clone().map(|c| c.phoenix_scores.reply_score),
     );
     record_head(
         receiver,
+        metric,
         "retweet",
-        candidates.iter().map(|c| c.phoenix_scores.retweet_score),
+        candidates.clone().map(|c| c.phoenix_scores.retweet_score),
     );
     record_head(
         receiver,
+        metric,
         "click",
-        candidates.iter().map(|c| c.phoenix_scores.click_score),
+        candidates.clone().map(|c| c.phoenix_scores.click_score),
     );
     record_head(
         receiver,
+        metric,
         "vqv",
-        candidates.iter().map(|c| c.phoenix_scores.vqv_score),
+        candidates.clone().map(|c| c.phoenix_scores.vqv_score),
     );
     record_head(
         receiver,
+        metric,
         "share",
-        candidates.iter().map(|c| c.phoenix_scores.share_score),
+        candidates.clone().map(|c| c.phoenix_scores.share_score),
     );
     record_head(
         receiver,
+        metric,
         "not_interested",
         candidates
-            .iter()
+            .clone()
             .map(|c| c.phoenix_scores.not_interested_score),
+    );
+    record_head_with_buckets(
+        receiver,
+        metric,
+        "dwellTime",
+        candidates.clone().map(|c| c.phoenix_scores.dwell_time),
+        HistogramBuckets::Bucket0To50,
     );
     record_head(
         receiver,
+        metric,
         "weightedScore",
-        candidates.iter().map(|c| c.weighted_score),
+        candidates.clone().map(|c| c.weighted_score),
     );
-    record_head(receiver, "finalScore", candidates.iter().map(|c| c.score));
+    record_head(receiver, metric, "finalScore", candidates.map(|c| c.score));
+}
+
+fn record_trace_author_score_distributions(
+    receiver: &dyn StatsReceiverExt,
+    selected_candidates: &[PostCandidate],
+    non_selected_candidates: &[PostCandidate],
+) {
+    let Some(&author_id) = TRACE_USER_IDS.first() else {
+        return;
+    };
+
+    let is_original =
+        |c: &&PostCandidate| c.retweeted_tweet_id.is_none() && c.in_reply_to_tweet_id.is_none();
+
+    let author_present = selected_candidates
+        .iter()
+        .chain(non_selected_candidates.iter())
+        .filter(is_original)
+        .any(|c| c.author_id == author_id);
+
+    if !author_present {
+        return;
+    }
+
+    if random::<f64>() >= DEFAULT_SAMPLING_RATE {
+        return;
+    }
+
+    let (author, others): (Vec<&PostCandidate>, Vec<&PostCandidate>) = selected_candidates
+        .iter()
+        .chain(non_selected_candidates.iter())
+        .filter(is_original)
+        .partition(|c| c.author_id == author_id);
+
+    record_score_distributions(receiver, "traceAuthorScore", author.iter().copied());
+    record_score_distributions(receiver, "traceOtherScore", others.iter().copied());
+}
+
+fn post_type(candidate: &PostCandidate) -> &'static str {
+    if candidate.retweeted_tweet_id.is_some() {
+        "repost"
+    } else if candidate.in_reply_to_tweet_id.is_some() {
+        "reply"
+    } else {
+        "original"
+    }
+}
+
+fn record_trace_author_served_by_type(
+    receiver: &dyn StatsReceiverExt,
+    selected_candidates: &[PostCandidate],
+    request_type: RequestType,
+) {
+    let Some(&author_id) = TRACE_USER_IDS.first() else {
+        return;
+    };
+
+    let author_present = selected_candidates.iter().any(|c| c.author_id == author_id);
+    if !author_present {
+        return;
+    }
+
+    if random::<f64>() >= DEFAULT_SAMPLING_RATE {
+        return;
+    }
+
+    let mut counts: HashMap<(Option<ServedType>, &'static str), u64> = HashMap::new();
+    for candidate in selected_candidates {
+        if candidate.author_id == author_id {
+            *counts
+                .entry((candidate.served_type, post_type(candidate)))
+                .or_insert(0) += 1;
+        }
+    }
+
+    let request_type = request_type.to_string();
+    let key = format!("{METRIC_PREFIX}.TraceAuthorServed");
+    for ((served_type, post_type), count) in counts {
+        let served_type = served_type.unwrap_or(ServedType::Undefined).as_str_name();
+        receiver.incr(
+            &key,
+            &[
+                ("request_type", request_type.as_str()),
+                ("served_type", served_type),
+                ("post_type", post_type),
+            ],
+            count,
+        );
+    }
 }
 
 fn record_phoenix_retrieval_stats(

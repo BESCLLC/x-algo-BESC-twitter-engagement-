@@ -1,36 +1,36 @@
 use crate::candidate_pipeline::{PipelineCandidate, PipelineQuery};
 use crate::util;
-use std::any::{Any, type_name_of_val};
+use crate::SPAN_LEVEL;
+use std::any::{type_name_of_val, Any};
 use std::hash::Hash;
 use tonic::async_trait;
 use tracing::warn;
 use xai_stats_receiver::global_stats_receiver;
 
-// Hydrators run in parallel and update candidate fields
 #[async_trait]
 pub trait Hydrator<Q, C>: Any + Send + Sync
 where
     Q: PipelineQuery,
     C: PipelineCandidate,
 {
-    /// Decide if this hydrator should run for the given query
     fn enable(&self, _query: &Q) -> bool {
         true
     }
 
-    /// Hydrate candidates by performing async operations.
-    /// Returns candidates with this hydrator's fields populated.
-    ///
-    /// IMPORTANT: The returned vector must have the same candidates in the same order as the input.
-    /// Dropping candidates in a hydrator is not allowed - use a filter stage instead.
     async fn hydrate(&self, query: &Q, candidates: &[C]) -> Vec<Result<C, String>>;
 
     #[xai_stats_macro::receive_stats(latency=Bucket50To500, size=Bucket500To2500)]
-    #[tracing::instrument(skip_all, name = "hydrator", fields(name = self.name()))]
+    #[tracing::instrument(level = SPAN_LEVEL, skip_all, name = "hydrator", fields(name = self.name()))]
     async fn run(&self, query: &Q, candidates: &[C]) -> Vec<Result<C, String>> {
         let hydrated = self.hydrate(query, candidates).await;
         let expected_len = candidates.len();
         if hydrated.len() == expected_len {
+            #[cfg(feature = "quiet-spans")]
+            tracing::info!(
+                component = self.name(),
+                candidate_count = expected_len,
+                "hydrator"
+            );
             hydrated
         } else {
             let message = format!(
@@ -47,12 +47,8 @@ where
         }
     }
 
-    /// Update a single candidate with the hydrated fields.
-    /// Only the fields this hydrator is responsible for should be copied.
     fn update(&self, candidate: &mut C, hydrated: C);
 
-    /// Update all successfully hydrated candidates with the fields from `hydrated`.
-    /// Default implementation iterates and calls `update` for each pair.
     fn update_all(&self, candidates: &mut [C], hydrated: Vec<Result<C, String>>) {
         for (candidate, hydrated) in candidates.iter_mut().zip(hydrated) {
             if let Ok(hydrated) = hydrated {
@@ -90,10 +86,17 @@ where
 
     fn cache_store(&self) -> &dyn CacheStore<Self::CacheKey, Self::CacheValue>;
     fn cache_key(&self, candidate: &C) -> Self::CacheKey;
+    fn cache_key_for(&self, _query: &Q, candidate: &C) -> Self::CacheKey {
+        self.cache_key(candidate)
+    }
     fn cache_value(&self, hydrated: &C) -> Self::CacheValue;
 
     fn hydrate_from_cache(&self, value: Self::CacheValue) -> C;
     async fn hydrate_from_client(&self, query: &Q, candidates: &[C]) -> Vec<Result<C, String>>;
+
+    fn already_hydrated(&self, _candidate: &C) -> bool {
+        false
+    }
 
     fn update(&self, candidate: &mut C, hydrated: C);
 
@@ -134,7 +137,11 @@ where
         let mut cache_misses = 0usize;
 
         for (index, candidate) in candidates.iter().enumerate() {
-            let key = self.cache_key(candidate);
+            if self.already_hydrated(candidate) {
+                results[index] = Some(Ok(self.hydrate_from_cache(self.cache_value(candidate))));
+                continue;
+            }
+            let key = self.cache_key_for(query, candidate);
             match self.cache_store().get(&key).await {
                 Some(value) => {
                     results[index] = Some(Ok(self.hydrate_from_cache(value)));
@@ -164,8 +171,8 @@ where
 
             for ((index, key), hydrated) in missing_indices
                 .into_iter()
-                .zip(missing_keys.into_iter())
-                .zip(hydrated_missing.into_iter())
+                .zip(missing_keys)
+                .zip(hydrated_missing)
             {
                 if let Ok(ref hydrated_candidate) = hydrated {
                     let value = self.cache_value(hydrated_candidate);

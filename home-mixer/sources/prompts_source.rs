@@ -1,11 +1,11 @@
 use crate::clients::prompts_client::PromptsClient;
-use crate::models::query::ScoredPostsQuery;
+use crate::models::query::{RequestType, ScoredPostsQuery};
 use crate::params::EnablePrompts;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use tonic::async_trait;
 use xai_candidate_pipeline::source::Source;
-use xai_home_mixer_proto::{FeedItem, Prompt, feed_item};
+use xai_home_mixer_proto::{feed_item, FeedItem, Prompt};
 use xai_prompts_thrift::injection_service::{
     ClientContext, DisplayContext, DisplayLocation, GetInjectionsRequest, PromptType,
     RequestTargetingContext,
@@ -61,8 +61,12 @@ fn build_get_injections_request(query: &ScoredPostsQuery) -> GetInjectionsReques
         ip_address: Some(query.ip_address.clone()),
     };
 
+    let display_location = match query.request_type {
+        RequestType::Following => DisplayLocation::HOME_LATEST_TIMELINE,
+        _ => DisplayLocation::HOME_TIMELINE,
+    };
     let display_context = DisplayContext {
-        display_location: DisplayLocation::HOME_TIMELINE,
+        display_location,
         timeline_id: None,
     };
 

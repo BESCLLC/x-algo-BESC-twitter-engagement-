@@ -1,11 +1,13 @@
-use crate::clients::kafka_publisher_client::KafkaPublisherClient;
 use crate::models::candidate::{CandidateHelpers, PostCandidate};
 use crate::models::query::ScoredPostsQuery;
-use crate::params::UseEgressSidecar;
 use crate::util::phoenix_request::build_prediction_request;
+use crate::util::shadow::is_shadow_sampled_for_cluster;
+use crate::util::xds::use_xds_for_cluster;
 use futures::future::join_all;
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use xai_candidate_pipeline::component_library::clients::kafka_publisher_client::KafkaPublisherClient;
+
 use strum::VariantArray;
 use thrift::OrderedFloat;
 use tonic::async_trait;
@@ -13,24 +15,24 @@ use xai_candidate_pipeline::component_library::clients::phoenix_prediction_clien
     PhoenixCluster, PhoenixPredictionClient,
 };
 use xai_candidate_pipeline::side_effect::{SideEffect, SideEffectInput};
-use xai_recsys_logging_thrift::{PredictionScore, ScoredCandidate, serialize_to_bytes_binary};
-use xai_recsys_proto::{ProductSurface, language_code_string_to_enum};
+use xai_recsys_logging_thrift::{serialize_to_bytes_binary, PredictionScore, ScoredCandidate};
+use xai_recsys_proto::{language_code_string_to_enum, ProductSurface};
 
 pub struct PhoenixExperimentsSideEffect {
     phoenix_client: Arc<dyn PhoenixPredictionClient + Send + Sync>,
-    egress_client: Arc<dyn PhoenixPredictionClient + Send + Sync>,
+    xds_client: Option<Arc<dyn PhoenixPredictionClient + Send + Sync>>,
     kafka_client: Arc<dyn KafkaPublisherClient>,
 }
 
 impl PhoenixExperimentsSideEffect {
     pub fn new(
         phoenix_client: Arc<dyn PhoenixPredictionClient + Send + Sync>,
-        egress_client: Arc<dyn PhoenixPredictionClient + Send + Sync>,
+        xds_client: Option<Arc<dyn PhoenixPredictionClient + Send + Sync>>,
         kafka_client: Arc<dyn KafkaPublisherClient>,
     ) -> Self {
         Self {
             phoenix_client,
-            egress_client,
+            xds_client,
             kafka_client,
         }
     }
@@ -59,23 +61,29 @@ impl SideEffect<ScoredPostsQuery, PostCandidate> for PhoenixExperimentsSideEffec
         };
 
         let user_id = input.query.user_id;
-        let use_egress: bool = input.query.params.get(UseEgressSidecar);
 
         let base_request =
             build_prediction_request(&input.query, &input.selected_candidates, product_surface);
 
         let futures = PhoenixCluster::VARIANTS
             .iter()
-            .filter(|c| c.is_shadow_eligible())
+            .filter(|&&c| {
+                is_shadow_sampled_for_cluster(&input.query.params, input.query.request_id, c)
+            })
             .map(|&cluster_id| {
-                let client = if use_egress {
-                    Arc::clone(&self.egress_client)
+                let cluster_name = format!("{cluster_id:?}");
+                let client = if use_xds_for_cluster(&input.query, &cluster_name) {
+                    self.xds_client
+                        .as_ref()
+                        .map(Arc::clone)
+                        .unwrap_or_else(|| Arc::clone(&self.phoenix_client))
                 } else {
                     Arc::clone(&self.phoenix_client)
                 };
                 let request = base_request.clone();
                 async move {
-                    let result = client.predict(cluster_id, request).await;
+                    let result: Result<_, tonic::Status> =
+                        client.predict(cluster_id, request, 0).await;
                     if let Err(ref err) = result {
                         tracing::error!(
                             "Phoenix experiment {:?} request failed: {}",
@@ -102,7 +110,9 @@ impl SideEffect<ScoredPostsQuery, PostCandidate> for PhoenixExperimentsSideEffec
                     ("reply", s.reply_score),
                     ("retweet", s.retweet_score),
                     ("photo_expand", s.photo_expand_score),
+                    ("video_open", s.video_open_score),
                     ("click", s.click_score),
+                    ("open_link", s.open_link_score),
                     ("profile_click", s.profile_click_score),
                     ("vqv", s.vqv_score),
                     ("share", s.share_score),
@@ -118,7 +128,14 @@ impl SideEffect<ScoredPostsQuery, PostCandidate> for PhoenixExperimentsSideEffec
                     ("mute_author", s.mute_author_score),
                     ("report", s.report_score),
                     ("not_dwelled", s.not_dwelled_score),
+                    ("post_unexplored", s.post_unexplored_score),
+                    ("pdwell", s.post_unexplored_score),
                     ("dwell_time", s.dwell_time),
+                    ("click_dwell_time", s.click_dwell_time),
+                    (
+                        "active_secs_5m_residual_norm",
+                        s.active_secs_5m_residual_norm,
+                    ),
                 ];
                 all_scores.extend(score_fields.iter().filter_map(|(name, score)| {
                     score.map(|v| {
@@ -155,6 +172,7 @@ impl SideEffect<ScoredPostsQuery, PostCandidate> for PhoenixExperimentsSideEffec
                     .as_deref()
                     .map(|lc| language_code_string_to_enum(lc) as i32),
                 video_duration_ms: candidate.min_video_duration_ms,
+                raw_query: None,
             };
 
             match serialize_to_bytes_binary(&scored) {
