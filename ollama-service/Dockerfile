@@ -7,7 +7,10 @@
 FROM ollama/ollama:latest
 
 # Override with a Railway build arg if you want a different model.
-ARG MODEL=qwen2.5:14b-instruct
+# qwen2.5:7b-instruct: chosen over the larger 14b variant after repeated
+# real-world timeouts on CPU-only inference — same weight-aware prompt,
+# roughly 2x the tokens/sec, reliably finishes within a web request.
+ARG MODEL=qwen2.5:7b-instruct
 ENV MODEL_NAME=${MODEL}
 ENV OLLAMA_HOST=0.0.0.0:11434
 
