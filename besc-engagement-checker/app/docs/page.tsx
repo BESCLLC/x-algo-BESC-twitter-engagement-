@@ -354,6 +354,15 @@ export default function Docs() {
               to <strong>reply</strong> (worth 10–40× a like), and give them something specific
               enough to be worth <strong>copy-link sharing</strong> (the single heaviest action).
             </P>
+            <Callout tone="info" title="Not all reply hooks are equal">
+              A question tied to the specifics of your post scores substantially higher here than
+              a bolt-on closer like &quot;What do you think?&quot;. That&apos;s deliberate, and it
+              was a bug worth fixing: the scorer used to reward the generic closer more, which
+              quietly pushed every optimized post toward the same lazy ending. Two reasons it
+              runs the other way now — a question that asks nothing gives a reader no reason to
+              answer, and thousands of posts ending in an identical tail is precisely the
+              templated-text pattern duplicate-text spam detection looks for across accounts.
+            </Callout>
             <P>
               Others cover writing craft — filler words, passive voice, weak openers, stock AI
               phrasing. Those are flagged as general craft signals, not as repo-cited weights,
@@ -376,7 +385,7 @@ export default function Docs() {
                 ["Trimmed hashtags to 2", "Beyond a couple reads as stuffing and dilutes the post"],
                 ["Removed templated CTA phrasing", "The fingerprint duplicate-text spam detection catches"],
                 ["Cut filler/hedge words", "Dilutes a claim without adding information"],
-                ["Added a genuine reply hook", "Reply is worth 10–40× a like"],
+                ["Added a reply hook", "Reply is worth 10–40× a like. A deterministic pass can't write a question about your specific post, so this is a varied fallback — a specific question scores materially higher"],
                 ["Trimmed to the character limit", "A hard constraint — applied whether or not it raises the score"],
               ]}
             />
@@ -393,6 +402,17 @@ export default function Docs() {
               if the deployment has an AI provider configured, and{" "}
               <strong>every AI output is still scored and gated by the same deterministic
               scorer</strong> — the AI only ever suggests, it never decides.
+            </P>
+            <P>
+              The model isn&apos;t just told &quot;make this engaging&quot;. It&apos;s given a
+              working brief on the ranking system, assembled from the same constants the scorer
+              uses: the full weight table and what the ratios imply, the structural limits that
+              cap reach before wording matters (reply/repost exclusion, the out-of-network
+              discount, author-diversity decay, the 48-hour cutoff), the label risks that can
+              drop a post outright, and the constraints of your specific post — what media is
+              attached, whether it&apos;s a reply, how many times you&apos;ve posted in this
+              window. That&apos;s what lets it write something worth copy-link sharing rather
+              than tacking a question onto the end.
             </P>
             <DefList
               items={[

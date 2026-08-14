@@ -59,10 +59,43 @@ function stripBoilerplateCTA(text: string): string {
   return result.replace(/[ \t]{2,}/g, " ").replace(/\s+([.,!?])/g, "$1").trim();
 }
 
+// Deliberately varied rather than one fixed string. A deterministic pass
+// can't write a question specific to the post — only the AI layer can — but
+// appending the identical tail to every post this tool touches would both
+// read as filler and manufacture the templated-text pattern duplicate-text
+// spam detection looks for across accounts. These are content-anchored where
+// the features allow it, and the choice is stable per draft.
+// Every one of these must end in a question mark. The optimizer runs multiple
+// passes and guards on "already has a question", so a statement-form hook
+// wouldn't be recognised as a hook on the next pass and would get a second
+// one appended after it.
+const FALLBACK_HOOKS = [
+  "What would you want next?",
+  "Where would you push back on this?",
+  "What would you do differently?",
+  "What's the first thing you'd change?",
+  "What's been your experience with this?",
+];
+const NUMBER_HOOKS = [
+  "Does that match what you've seen?",
+  "How far off is that from your numbers?",
+];
+
+// Stable per-text choice, so re-running the optimizer on the same draft is
+// idempotent (the multi-pass walk depends on that) while different drafts
+// still get different endings.
+function stableIndex(text: string, modulo: number): number {
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) | 0;
+  return Math.abs(hash) % modulo;
+}
+
 function addReplyHook(text: string, charLimit: number): string {
   const lower = text.toLowerCase();
   if (text.includes("?") || REPLY_CTA_PHRASES.some((p) => lower.includes(p))) return text;
-  const addition = " What do you think?";
+
+  const pool = /\d/.test(text) ? NUMBER_HOOKS : FALLBACK_HOOKS;
+  const addition = ` ${pool[stableIndex(text, pool.length)]}`;
   if (text.length + addition.length > charLimit) return text;
   return text.trim() + addition;
 }
@@ -120,8 +153,9 @@ function buildRules(protectedWords: Set<string>, charLimit: number): Rule[] {
   },
   {
     id: "add-reply-hook",
-    label: "Added a genuine reply hook",
-    reason: "Reply is weighted 5.0–20.0 vs 0.5 for a like: 10–40x more valuable. A real question gives people a reason to respond.",
+    label: "Added a reply hook",
+    reason:
+      "Reply is weighted 5.0–20.0 vs 0.5 for a like: 10–40x more valuable. This is a generic fallback — a question tied to the specifics of your post scores substantially higher, so it's worth replacing by hand or with the AI rewrite.",
     transform: (t: string) => addReplyHook(t, charLimit),
   },
   {

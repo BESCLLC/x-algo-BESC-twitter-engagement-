@@ -58,6 +58,8 @@ export interface FeatureReport {
   exclamationBursts: number;
   hasQuestion: number;
   hasReplyCTA: boolean;
+  /** Whether the post asks something specific to its own content, a generic closer, or nothing. */
+  replyHookKind: "specific" | "generic" | "none";
   hasShareCTA: boolean;
   hasBoilerplateCTA: boolean;
   hasAiSlopPhrasing: boolean;

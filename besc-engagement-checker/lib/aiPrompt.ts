@@ -1,52 +1,57 @@
-import { WEIGHTS, BOILERPLATE_PHRASES, AI_SLOP_PHRASES } from "./scoring";
+import { buildAlgorithmBrief, buildSituationBrief } from "./algorithmContext";
+import type { AnalyzeRequest, GenerateRequest } from "./types";
 
-// Shared between every AI rewrite provider (Ollama, Gemini, ...) so the
-// prompt can't quietly drift out of sync between them, and so it stays
-// pulled from the real weights in scoring.ts rather than a hand-picked
-// subset baked into prose.
-export function buildRewritePrompt(text: string, numVariants: number, charLimit: number): string {
-  const boilerplateSample = BOILERPLATE_PHRASES.slice(0, 3).join('", "');
-  const slopSample = AI_SLOP_PHRASES.slice(0, 4).join('", "');
-  return `Rewrite an X post to score higher on a weighted-action ranking algorithm. Weights (weight x probability, summed):
-+${WEIGHTS.shareViaCopyLink} share-via-copy-link (highest weight; needs a concrete hook/stat/story, not vague)
-+${WEIGHTS.reply}/+${WEIGHTS.reply + WEIGHTS.bidirectionalReplyBoost} reply (end with a specific question fitting THIS content, not generic "thoughts?")
-+${WEIGHTS.quote} quote, +${WEIGHTS.shareViaDm} DM-share, +${WEIGHTS.followAuthor} follow, +${WEIGHTS.share} share, +${WEIGHTS.retweet} repost, +${WEIGHTS.favorite} like (lowest, don't chase)
-${WEIGHTS.report} report, ${WEIGHTS.muteAuthor} mute, ${WEIGHTS.notInterested} not-interested, ${WEIGHTS.blockAuthor} block: triggered by ALL-CAPS, !!!/???, >2 hashtags, boilerplate like "${boilerplateSample}", shortened links.
-Also avoid filler words (very/just/actually/I think), passive voice, and stock AI phrasing like "${slopSample}"; open with the point, not a wind-up. Max ${charLimit.toLocaleString()} chars. Never invent facts/names/numbers; preserve every claim exactly.
+// Both prompts open with the same algorithm brief, assembled from the real
+// constants in scoring.ts, so a model is reasoning about the actual mechanics
+// rather than being handed a bare weight list and told to "make it engaging".
+// That's the difference between a rewrite that tacks on "What do you think?"
+// and one that knows a copy-link share outweighs a like 40:1 and writes
+// something worth sending to a friend.
+
+export function buildRewritePrompt(
+  text: string,
+  numVariants: number,
+  charLimit: number,
+  req?: AnalyzeRequest
+): string {
+  const situation = req ? `\n\n${buildSituationBrief(req, charLimit)}` : "";
+  return `${buildAlgorithmBrief()}${situation}
+
+YOUR TASK
+Rewrite the post below so it scores higher against the system above, keeping the author's voice and every factual claim exactly as written. Preserve meaning precisely: never upgrade a pending thing into a finished one, never add specifics that aren't already there, never invent facts, names, numbers or links.
 
 Post:
 """
 ${text}
 """
 
-Write ${numVariants} tighter rewrites of this SAME post, same voice and facts, each ending with a hook relevant to this content. Output only lines starting "VARIANT: ", nothing else.`;
+Write ${numVariants} tighter rewrites of this SAME post. Lead with the point rather than a wind-up, cut filler and passive voice, and end each with a reply hook that could only belong to this post. Make the variants genuinely different approaches, not reworded twins.
+Output only lines starting "VARIANT: ", nothing else.`;
 }
 
-// Generation from scratch is a materially different risk than rewriting: a
-// rewrite has the user's own words as ground truth to preserve, but loose
-// context gives the model room to invent specifics that sound plausible.
-// The "only use facts... never invent specifics" instruction is the whole
-// defense against that — kept explicit and separate from the rewrite
-// prompt's "preserve every claim exactly" framing, which doesn't apply here.
-export function buildGeneratePrompt(context: string, numVariants: number, charLimit: number): string {
-  const boilerplateSample = BOILERPLATE_PHRASES.slice(0, 3).join('", "');
-  const slopSample = AI_SLOP_PHRASES.slice(0, 4).join('", "');
-  return `Write an original X post from scratch based on the context below, optimized to score high on a weighted-action ranking algorithm. Weights (weight x probability, summed):
-+${WEIGHTS.shareViaCopyLink} share-via-copy-link (highest weight; needs a concrete hook/stat/story, not vague)
-+${WEIGHTS.reply}/+${WEIGHTS.reply + WEIGHTS.bidirectionalReplyBoost} reply (end with a specific question fitting THIS content, not generic "thoughts?")
-+${WEIGHTS.quote} quote, +${WEIGHTS.shareViaDm} DM-share, +${WEIGHTS.followAuthor} follow, +${WEIGHTS.share} share, +${WEIGHTS.retweet} repost, +${WEIGHTS.favorite} like (lowest, don't chase)
-${WEIGHTS.report} report, ${WEIGHTS.muteAuthor} mute, ${WEIGHTS.notInterested} not-interested, ${WEIGHTS.blockAuthor} block: triggered by ALL-CAPS, !!!/???, >2 hashtags, boilerplate like "${boilerplateSample}", shortened links.
-Avoid filler words (very/just/actually/I think), passive voice, and stock AI phrasing like "${slopSample}"; open with the point, not a wind-up. Write like a real person who has something specific to say, not marketing copy. Max ${charLimit.toLocaleString()} chars.
+export function buildGeneratePrompt(
+  context: string,
+  numVariants: number,
+  charLimit: number,
+  req?: GenerateRequest
+): string {
+  const situation = req ? `\n\n${buildSituationBrief(req, charLimit)}` : "";
+  return `${buildAlgorithmBrief()}${situation}
 
-CRITICAL: Only use facts, names, and numbers that appear in the context below. Never invent specifics (stats, dates, names, outcomes) that aren't there — if the context is vague on a detail, write around it in general terms instead of making something up to sound concrete.
-CRITICAL: Never write a URL or link, not even a placeholder like "https://" or "[link]". Only include a link if the exact URL appears verbatim in the context; otherwise write the post without one — links are attached separately, outside the post text.
+YOUR TASK
+Write original X posts from the notes below, engineered to score well against the system above.
 
-Context from the user (a rough idea, not finished text):
+CRITICAL — the notes are the only source of truth. Use only the facts, names and numbers that appear in them. Never invent specifics (stats, dates, names, outcomes) to sound concrete; if the notes are vague on a detail, write around it. Never write a URL or link, not even a placeholder like "https://" or "[link]" — links are attached separately, outside the post text.
+
+Write like a person with something specific to say, not like marketing copy. No stock AI phrasing, no hype, no emoji padding.
+
+Notes from the author (a rough idea, not finished text):
 """
 ${context}
 """
 
-Write ${numVariants} different complete post options based on this context — genuinely different angles or hooks on the same idea, not minor rewordings of each other — each a full standalone post ending with a hook relevant to this content. Output only lines starting "VARIANT: ", nothing else.`;
+Write ${numVariants} complete posts, each a standalone option taking a genuinely different angle on the same material — a different hook, a different opening move, a different question — not reworded versions of one another.
+Output only lines starting "VARIANT: ", nothing else.`;
 }
 
 // A flat output-token cap doesn't scale: English runs roughly 4 chars/token,

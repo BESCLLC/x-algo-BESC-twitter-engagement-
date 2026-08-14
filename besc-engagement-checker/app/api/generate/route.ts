@@ -31,8 +31,8 @@ export async function POST(req: NextRequest) {
     // more variants for a wider best-of-N pool; Ollama (self-hosted CPU)
     // stays conservative given its timeout history — see lib/ollama.ts.
     const rawCandidates = geminiConfigured()
-      ? await generatePostsFromContextGemini(context, undefined, charLimit)
-      : await generatePostsFromContext(context, undefined, charLimit);
+      ? await generatePostsFromContextGemini(context, undefined, charLimit, parsed)
+      : await generatePostsFromContext(context, undefined, charLimit, parsed);
 
     // Every AI-written candidate still gets run through the deterministic
     // optimizer before it's shown — same "suggest, never decide" contract as

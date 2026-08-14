@@ -1,4 +1,5 @@
 import { buildGeneratePrompt, buildRewritePrompt, estimateMaxOutputTokens, parseVariants } from "./aiPrompt";
+import type { AnalyzeRequest, GenerateRequest } from "./types";
 
 export class GeminiError extends Error {}
 
@@ -88,10 +89,11 @@ async function callGeminiForVariants(
 export async function generateRewriteCandidatesGemini(
   text: string,
   numVariants = 2,
-  charLimit = 280
+  charLimit = 280,
+  req?: AnalyzeRequest
 ): Promise<string[]> {
   return callGeminiForVariants(
-    buildRewritePrompt(text, numVariants, charLimit),
+    buildRewritePrompt(text, numVariants, charLimit, req),
     numVariants,
     estimateMaxOutputTokens(charLimit, numVariants) + THINKING_HEADROOM_TOKENS
   );
@@ -105,10 +107,11 @@ export async function generateRewriteCandidatesGemini(
 export async function generatePostsFromContextGemini(
   context: string,
   numVariants = 5,
-  charLimit = 280
+  charLimit = 280,
+  req?: GenerateRequest
 ): Promise<string[]> {
   return callGeminiForVariants(
-    buildGeneratePrompt(context, numVariants, charLimit),
+    buildGeneratePrompt(context, numVariants, charLimit, req),
     numVariants,
     estimateMaxOutputTokens(charLimit, numVariants) + THINKING_HEADROOM_TOKENS
   );

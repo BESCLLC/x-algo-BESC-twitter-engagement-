@@ -1,4 +1,5 @@
 import { buildGeneratePrompt, buildRewritePrompt, estimateMaxOutputTokens, parseVariants } from "./aiPrompt";
+import type { AnalyzeRequest, GenerateRequest } from "./types";
 
 export class OllamaError extends Error {}
 
@@ -127,10 +128,11 @@ async function callOllamaForVariants(
 export async function generateRewriteCandidates(
   text: string,
   numVariants = 2,
-  charLimit = 280
+  charLimit = 280,
+  req?: AnalyzeRequest
 ): Promise<string[]> {
   return callOllamaForVariants(
-    buildRewritePrompt(text, numVariants, charLimit),
+    buildRewritePrompt(text, numVariants, charLimit, req),
     numVariants,
     Math.min(OLLAMA_MAX_OUTPUT_TOKENS, estimateMaxOutputTokens(charLimit, numVariants))
   );
@@ -142,10 +144,11 @@ export async function generateRewriteCandidates(
 export async function generatePostsFromContext(
   context: string,
   numVariants = 3,
-  charLimit = 280
+  charLimit = 280,
+  req?: GenerateRequest
 ): Promise<string[]> {
   return callOllamaForVariants(
-    buildGeneratePrompt(context, numVariants, charLimit),
+    buildGeneratePrompt(context, numVariants, charLimit, req),
     numVariants,
     Math.min(OLLAMA_MAX_OUTPUT_TOKENS, estimateMaxOutputTokens(charLimit, numVariants))
   );

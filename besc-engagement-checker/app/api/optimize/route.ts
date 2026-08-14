@@ -29,9 +29,10 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    const charLimit = getCharLimit(parsed.isVerified);
     const candidates = geminiConfigured()
-      ? await generateRewriteCandidatesGemini(result.optimizedText, 2, getCharLimit(parsed.isVerified))
-      : await generateRewriteCandidates(result.optimizedText, 2, getCharLimit(parsed.isVerified));
+      ? await generateRewriteCandidatesGemini(result.optimizedText, 2, charLimit, parsed)
+      : await generateRewriteCandidates(result.optimizedText, 2, charLimit, parsed);
     const scored: AICandidate[] = candidates
       .map((text) => ({ text, score: analyzePost({ ...parsed, text }).score }))
       .filter((c) => c.score > result.after.score)

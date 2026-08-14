@@ -168,6 +168,69 @@ export const REPLY_CTA_PHRASES = [
   "unpopular opinion",
 ];
 
+// Closers that invite a reply without asking anything real. Kept separate
+// from REPLY_CTA_PHRASES because they need to score *worse*, not better: a
+// bolt-on "What do you think?" gives a reader almost no reason to answer,
+// and a tool that appends the identical tail to thousands of posts is
+// manufacturing exactly the templated-text pattern duplicate-text spam
+// detection looks for (BBQDuplicateTextProd.bot).
+export const GENERIC_CLOSERS = [
+  "what do you think",
+  "what are your thoughts",
+  "thoughts",
+  "agree or disagree",
+  "do you agree",
+  "who agrees",
+  "reply below",
+  "comment below",
+  "let me know",
+  "am i wrong",
+  "change my mind",
+  "right or wrong",
+];
+
+const QUESTION_STOPWORDS = new Set([
+  "what", "who", "when", "where", "why", "how", "which", "do", "does", "did",
+  "is", "are", "was", "were", "will", "would", "should", "could", "can", "you",
+  "your", "yours", "i", "we", "they", "it", "this", "that", "the", "a", "an",
+  "of", "to", "in", "on", "for", "and", "or", "but", "if", "so", "me", "my",
+  "any", "one", "next", "most", "more", "here", "there", "about", "think",
+]);
+
+export type ReplyHookKind = "specific" | "generic" | "none";
+
+/**
+ * Distinguishes a question that carries real content from a bolt-on closer.
+ * This drives the reply-probability estimate, and getting it right is what
+ * stops the whole tool from converging on "What do you think?" — see the
+ * comment on GENERIC_CLOSERS.
+ */
+export function classifyReplyHook(text: string): ReplyHookKind {
+  const lower = text.toLowerCase();
+  const questions = text
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.includes("?"));
+
+  if (questions.length === 0) {
+    // A CTA can invite replies without a question mark ("reply with your...").
+    return REPLY_CTA_PHRASES.some((p) => lower.includes(p)) ? "generic" : "none";
+  }
+
+  for (const question of questions) {
+    let remainder = question.toLowerCase();
+    for (const closer of GENERIC_CLOSERS) remainder = remainder.split(closer).join(" ");
+    const contentWords = remainder
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length > 1 && !QUESTION_STOPWORDS.has(w));
+    // Enough left over, once the boilerplate and function words are gone,
+    // that the question is actually asking about *this* post.
+    if (contentWords.length >= 3) return "specific";
+  }
+  return "generic";
+}
+
 const SHARE_CTA_PHRASES = [
   "share this",
   "send this to",
@@ -217,6 +280,7 @@ export function extractFeatures(text: string, link: string): FeatureReport {
 
   const lower = trimmed.toLowerCase();
   const hasReplyCTA = REPLY_CTA_PHRASES.some((p) => lower.includes(p));
+  const replyHookKind = classifyReplyHook(trimmed);
   const hasShareCTA = SHARE_CTA_PHRASES.some((p) => lower.includes(p));
   const hasBoilerplateCTA = BOILERPLATE_PHRASES.some((p) => lower.includes(p));
   const hasAiSlopPhrasing = AI_SLOP_PHRASES.some((p) => lower.includes(p));
@@ -256,6 +320,7 @@ export function extractFeatures(text: string, link: string): FeatureReport {
     exclamationBursts,
     hasQuestion,
     hasReplyCTA,
+    replyHookKind,
     hasShareCTA,
     hasBoilerplateCTA,
     hasAiSlopPhrasing,
@@ -336,12 +401,18 @@ function estimateActionProbabilities(
       wordinessPenalty * 0.06
   );
 
+  // A specific question is worth far more than a generic closer, and the gap
+  // is deliberate. The old model gave a bolt-on "What do you think?" +0.46
+  // (CTA + question mark) against +0.18 for a genuinely specific question —
+  // so every optimizer pass and every AI candidate gate was being pulled
+  // toward the laziest possible ending. Reality runs the other way: a
+  // question only someone who read the post can answer is what actually earns
+  // replies, and the identical-tail version courts duplicate-text detection.
+  const replyHookCredit =
+    f.replyHookKind === "specific" ? 0.4 : f.replyHookKind === "generic" ? 0.15 : 0;
+
   const reply = clamp01(
-    0.02 +
-      (f.hasQuestion > 0 ? 0.18 : 0) +
-      (f.hasReplyCTA ? 0.28 : 0) -
-      spamPenalty * 0.1 -
-      wordinessPenalty * 0.08
+    0.02 + replyHookCredit - spamPenalty * 0.1 - wordinessPenalty * 0.08
   );
 
   const retweet = clamp01(
@@ -779,12 +850,20 @@ function buildTips(f: FeatureReport, req: AnalyzeRequest, risks: RiskFlag[]): Ti
     });
   }
 
-  if (!f.hasReplyCTA && f.hasQuestion === 0) {
+  if (f.replyHookKind === "none") {
     tips.push({
       id: "ask-question",
       title: "Give people a reason to reply, not just like",
       detail:
         "Reply is weighted 5.0–20.0 (with the bidirectional-follow boost), versus 0.5 for a like: 10 to 40× more valuable. End with a genuine question or a clear stance people will want to respond to.",
+      impact: "high",
+    });
+  } else if (f.replyHookKind === "generic") {
+    tips.push({
+      id: "specific-question",
+      title: "Swap the generic closer for a question only your readers can answer",
+      detail:
+        '"What do you think?" and "Thoughts?" ask nothing, so most people scroll past them. A question tied to the specifics of this post — one that assumes the reader actually read it — is what earns replies, and it avoids looking like the templated tail that duplicate-text spam detection is built to catch.',
       impact: "high",
     });
   }
