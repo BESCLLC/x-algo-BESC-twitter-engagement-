@@ -11,8 +11,17 @@ import {
   Repeat2,
   Download,
   Loader2,
+  Wand2,
+  Check,
+  X,
 } from "lucide-react";
-import type { AnalyzeRequest, MediaType, ScoreResult, TweetImportResult } from "@/lib/types";
+import type {
+  AnalyzeRequest,
+  MediaType,
+  OptimizeResult,
+  ScoreResult,
+  TweetImportResult,
+} from "@/lib/types";
 
 const MEDIA_OPTIONS: { id: MediaType; label: string; icon: typeof ImageIcon }[] = [
   { id: "none", label: "Text only", icon: Ban },
@@ -46,6 +55,46 @@ export default function Composer({
   const [importUrl, setImportUrl] = useState("");
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+
+  const [optimizeResult, setOptimizeResult] = useState<OptimizeResult | null>(null);
+  const [optimizing, setOptimizing] = useState(false);
+  const [optimizeError, setOptimizeError] = useState<string | null>(null);
+
+  async function optimize() {
+    if (!text.trim() || optimizing) return;
+    setOptimizing(true);
+    setOptimizeError(null);
+    setOptimizeResult(null);
+    try {
+      const payload: AnalyzeRequest = {
+        text,
+        mediaType,
+        link,
+        isReplyToMutual,
+        recentPostsCount,
+        nsfw,
+      };
+      const res = await fetch("/api/optimize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Optimize failed");
+      setOptimizeResult(data as OptimizeResult);
+    } catch (e) {
+      setOptimizeError((e as Error).message);
+    } finally {
+      setOptimizing(false);
+    }
+  }
+
+  function applyOptimized() {
+    if (!optimizeResult) return;
+    setText(optimizeResult.optimizedText);
+    setOptimizeResult(null);
+    onImport?.(null);
+  }
 
   async function importFromUrl() {
     if (!importUrl.trim() || importing) return;
@@ -160,6 +209,7 @@ export default function Composer({
         onChange={(e) => {
           setText(e.target.value);
           onImport?.(null);
+          setOptimizeResult(null);
         }}
         placeholder="What's happening?"
         rows={5}
@@ -251,6 +301,86 @@ export default function Composer({
           </button>
         </div>
       </div>
+
+      <button
+        type="button"
+        onClick={optimize}
+        disabled={!text.trim() || optimizing}
+        className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl border border-besc-400/50 bg-gradient-to-r from-besc-500/20 to-besc-500/5 py-3 text-sm font-semibold text-besc-200 transition-colors hover:from-besc-500/30 hover:to-besc-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {optimizing ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <Wand2 className="h-4 w-4" />
+        )}
+        Optimize for the algorithm
+      </button>
+      {optimizeError && <p className="mt-2 text-xs text-danger">{optimizeError}</p>}
+
+      {optimizeResult && (
+        <div className="mt-4 rounded-2xl border border-besc-400/30 bg-besc-500/[0.06] p-4">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-white/85">
+              {optimizeResult.applied.length === 0
+                ? "Already clean — no mechanical fixes found"
+                : `${optimizeResult.applied.length} fix${optimizeResult.applied.length > 1 ? "es" : ""} applied`}
+            </span>
+            <span className="flex items-center gap-1.5 font-mono text-sm tabular-nums">
+              <span className="text-white/40">{optimizeResult.before.score.toFixed(1)}</span>
+              <span className="text-white/25">→</span>
+              <span
+                className={
+                  optimizeResult.after.score > optimizeResult.before.score
+                    ? "font-semibold text-besc-300"
+                    : "text-white/60"
+                }
+              >
+                {optimizeResult.after.score.toFixed(1)}
+              </span>
+            </span>
+          </div>
+
+          {optimizeResult.applied.length > 0 && (
+            <>
+              <ul className="mt-3 space-y-2">
+                {optimizeResult.applied.map((step) => (
+                  <li key={step.id} className="flex items-start gap-2 text-[12.5px] leading-relaxed">
+                    <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-besc-300" />
+                    <div>
+                      <span className="font-medium text-white/80">{step.label}</span>
+                      <span className="ml-1.5 font-mono text-[10.5px] text-white/35">
+                        +{(step.scoreAfter - step.scoreBefore).toFixed(1)}
+                      </span>
+                      <p className="text-white/45">{step.reason}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="mt-3 rounded-xl border border-white/10 bg-black/25 p-3 text-[13px] leading-relaxed text-white/70">
+                {optimizeResult.optimizedText}
+              </div>
+
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  onClick={applyOptimized}
+                  className="flex items-center gap-1.5 rounded-full bg-besc-500 px-3.5 py-1.5 text-xs font-semibold text-black transition-colors hover:bg-besc-400"
+                >
+                  <Check className="h-3.5 w-3.5" /> Use this version
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOptimizeResult(null)}
+                  className="flex items-center gap-1.5 rounded-full border border-white/15 px-3.5 py-1.5 text-xs font-medium text-white/50 transition-colors hover:text-white/80"
+                >
+                  <X className="h-3.5 w-3.5" /> Dismiss
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

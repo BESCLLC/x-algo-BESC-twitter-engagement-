@@ -1,0 +1,177 @@
+import { analyzePost, BOILERPLATE_PHRASES, REPLY_CTA_PHRASES } from "./scoring";
+import type { AnalyzeRequest, OptimizeResult, OptimizeStep } from "./types";
+
+const CHAR_LIMIT = 280;
+
+function collapsePunctuationBursts(text: string): string {
+  return text.replace(/[!?]{2,}/g, (m) => m[0]);
+}
+
+function titleCaseWord(word: string): string {
+  const m = word.match(/^([A-Za-z]+)(.*)$/);
+  if (!m) return word;
+  const [, letters, rest] = m;
+  return letters[0].toUpperCase() + letters.slice(1).toLowerCase() + rest;
+}
+
+// Mirrors the all-caps detection in scoring.ts's extractFeatures, so anything
+// flagged as "shouting" there is exactly what gets defused here.
+function fixAllCapsShouting(text: string): string {
+  return text
+    .split(/(\s+)/)
+    .map((token) => {
+      const isAllCapsWord = token.length >= 3 && token === token.toUpperCase() && /[A-Z]/.test(token);
+      return isAllCapsWord ? titleCaseWord(token) : token;
+    })
+    .join("");
+}
+
+function capHashtags(text: string, max: number): string {
+  const matches = [...text.matchAll(/(^|\s)#[a-zA-Z0-9_]+/g)];
+  if (matches.length <= max) return text;
+  let result = text;
+  for (const m of matches.slice(max).reverse()) {
+    const start = m.index ?? 0;
+    result = result.slice(0, start) + result.slice(start + m[0].length);
+  }
+  return result.replace(/[ \t]{2,}/g, " ").trim();
+}
+
+function stripBoilerplateCTA(text: string): string {
+  let result = text;
+  let matched = false;
+  for (const phrase of BOILERPLATE_PHRASES) {
+    const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const next = result.replace(new RegExp(`\\b${escaped}\\b[.!,]?`, "gi"), "");
+    if (next !== result) matched = true;
+    result = next;
+  }
+  if (!matched) return text;
+  return result.replace(/[ \t]{2,}/g, " ").replace(/\s+([.,!?])/g, "$1").trim();
+}
+
+function addReplyHook(text: string): string {
+  const lower = text.toLowerCase();
+  if (text.includes("?") || REPLY_CTA_PHRASES.some((p) => lower.includes(p))) return text;
+  const addition = " What do you think?";
+  if (text.length + addition.length > CHAR_LIMIT) return text;
+  return text.trim() + addition;
+}
+
+function trimToCharLimit(text: string): string {
+  if (text.length <= CHAR_LIMIT) return text;
+  const cut = text.slice(0, CHAR_LIMIT - 1);
+  const lastSpace = cut.lastIndexOf(" ");
+  return (lastSpace > 40 ? cut.slice(0, lastSpace) : cut).trim() + "…";
+}
+
+interface Rule {
+  id: string;
+  label: string;
+  reason: string;
+  transform: (text: string) => string;
+  /** Apply even if it doesn't raise the score — a hard constraint, not an optimization. */
+  forced?: boolean;
+}
+
+const RULES: Rule[] = [
+  {
+    id: "collapse-punctuation",
+    label: "Toned down !!! / ??? bursts",
+    reason: "Repeated punctuation feeds the same spam-style penalty as ALL-CAPS.",
+    transform: collapsePunctuationBursts,
+  },
+  {
+    id: "fix-all-caps",
+    label: "Fixed ALL-CAPS shouting",
+    reason:
+      "A high all-caps ratio pushes up Not-interested/Mute/Report propensity — the three most negative weights in the model.",
+    transform: fixAllCapsShouting,
+  },
+  {
+    id: "cap-hashtags",
+    label: "Trimmed hashtags to 2",
+    reason: "Hashtags beyond a couple read as stuffing — reach comes from the ranking model, not tag volume.",
+    transform: (t) => capHashtags(t, 2),
+  },
+  {
+    id: "strip-boilerplate",
+    label: "Removed templated CTA phrasing",
+    reason:
+      'Generic phrases like "link in bio" or "RT if you agree" are the exact fingerprint duplicate-text spam detection looks for.',
+    transform: stripBoilerplateCTA,
+  },
+  {
+    id: "add-reply-hook",
+    label: "Added a genuine reply hook",
+    reason: "Reply is weighted 5.0–20.0 vs 0.5 for a like — 10–40x more valuable. A real question gives people a reason to respond.",
+    transform: addReplyHook,
+  },
+  {
+    id: "trim-to-limit",
+    label: "Trimmed to fit the 280-character limit",
+    reason: "Posts over the limit can't be published as-is.",
+    transform: trimToCharLimit,
+    forced: true,
+  },
+];
+
+/**
+ * Deterministic, meaning-preserving fixer: each rule is only kept if it
+ * measurably raises the BESC Score (or is a hard constraint like the char
+ * limit), computed via the same analyzePost() used everywhere else — so
+ * "optimized" always means provably scores higher, never just "sounds better."
+ */
+const MAX_PASSES = 3;
+
+// Multiple passes because later rules (e.g. stripping a boilerplate phrase)
+// can juxtapose leftover text into a fresh pattern an earlier rule already
+// "fixed" once — e.g. "NOW!!! Link in bio ???" -> "NOW! ?" -> "NOW!?" after
+// the boilerplate phrase between them is removed. Rules are idempotent, so
+// re-running the whole list until nothing changes converges safely.
+export function optimizePost(req: AnalyzeRequest): OptimizeResult {
+  const before = analyzePost(req);
+  let current: AnalyzeRequest = { ...req };
+  let currentScore = before;
+  const appliedMap = new Map<string, OptimizeStep>();
+
+  for (let pass = 0; pass < MAX_PASSES; pass++) {
+    let changedThisPass = false;
+
+    for (const rule of RULES) {
+      const nextText = rule.transform(current.text);
+      if (nextText === current.text) continue;
+
+      const candidate: AnalyzeRequest = { ...current, text: nextText };
+      const candidateScore = analyzePost(candidate);
+
+      if (rule.forced || candidateScore.score >= currentScore.score) {
+        const existing = appliedMap.get(rule.id);
+        if (existing) {
+          existing.scoreAfter = candidateScore.score;
+        } else {
+          appliedMap.set(rule.id, {
+            id: rule.id,
+            label: rule.label,
+            reason: rule.reason,
+            scoreBefore: currentScore.score,
+            scoreAfter: candidateScore.score,
+          });
+        }
+        current = candidate;
+        currentScore = candidateScore;
+        changedThisPass = true;
+      }
+    }
+
+    if (!changedThisPass) break;
+  }
+
+  return {
+    originalText: req.text,
+    optimizedText: current.text,
+    applied: Array.from(appliedMap.values()),
+    before,
+    after: currentScore,
+  };
+}

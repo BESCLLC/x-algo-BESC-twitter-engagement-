@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { analyzePost } from "@/lib/scoring";
+import { optimizePost } from "@/lib/optimize";
 import { parseAnalyzeRequest } from "@/lib/request";
 import type { AnalyzeRequest } from "@/lib/types";
 
@@ -16,5 +16,5 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "text is required" }, { status: 400 });
   }
 
-  return NextResponse.json(analyzePost(parsed));
+  return NextResponse.json(optimizePost(parsed));
 }

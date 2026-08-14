@@ -57,7 +57,7 @@ const EMOJI_RE =
 
 const URL_RE = /(https?:\/\/[^\s]+)|(\bwww\.[^\s]+)/gi;
 const MENTION_RE = /(^|\s)@[a-zA-Z0-9_]{1,15}/g;
-const HASHTAG_RE = /(^|\s)#[a-zA-Z0-9_]+/g;
+export const HASHTAG_RE = /(^|\s)#[a-zA-Z0-9_]+/g;
 
 const SHORTENER_HOSTS = [
   "bit.ly",
@@ -73,7 +73,7 @@ const SHORTENER_HOSTS = [
   "tiny.cc",
 ];
 
-const BOILERPLATE_PHRASES = [
+export const BOILERPLATE_PHRASES = [
   "follow for follow",
   "f4f",
   "follow me for more",
@@ -89,7 +89,7 @@ const BOILERPLATE_PHRASES = [
   "tag a friend",
 ];
 
-const REPLY_CTA_PHRASES = [
+export const REPLY_CTA_PHRASES = [
   "what do you think",
   "thoughts?",
   "agree or disagree",

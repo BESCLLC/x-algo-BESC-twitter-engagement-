@@ -74,6 +74,22 @@ export interface TweetImportResult {
   };
 }
 
+export interface OptimizeStep {
+  id: string;
+  label: string;
+  reason: string;
+  scoreBefore: number;
+  scoreAfter: number;
+}
+
+export interface OptimizeResult {
+  originalText: string;
+  optimizedText: string;
+  applied: OptimizeStep[];
+  before: ScoreResult;
+  after: ScoreResult;
+}
+
 export interface ScoreResult {
   score: number;
   grade: string;
