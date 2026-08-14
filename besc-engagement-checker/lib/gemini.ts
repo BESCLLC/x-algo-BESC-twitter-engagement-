@@ -9,7 +9,12 @@ const REQUEST_TIMEOUT_MS = 20000;
 
 const MAX_OUTPUT_TOKENS = 250;
 
-const DEFAULT_MODEL = "gemini-2.5-flash";
+// A dated model ID (e.g. "gemini-2.5-flash") can get retired out from under
+// new API keys without warning — that's exactly what happened here. The
+// "-latest" alias is Google's own answer to that: it always resolves to
+// their current recommended flash-tier model, with an emailed 2-week notice
+// before the alias target changes, instead of a cold 404 in production.
+const DEFAULT_MODEL = "gemini-flash-latest";
 
 export function geminiConfigured(): boolean {
   return Boolean(process.env.GEMINI_API_KEY);
