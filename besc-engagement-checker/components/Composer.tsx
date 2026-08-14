@@ -210,7 +210,7 @@ export default function Composer({
           onChange={(e) => setImportUrl(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && importFromUrl()}
           placeholder="Or paste a live x.com/…/status/… link to score a real post"
-          className="w-full bg-transparent text-sm text-white/80 placeholder:text-white/25 focus:outline-none"
+          className="w-full min-w-0 bg-transparent text-sm text-white/80 placeholder:text-white/25 focus:outline-none"
         />
         <button
           type="button"
@@ -265,34 +265,34 @@ export default function Composer({
           value={link}
           onChange={(e) => setLink(e.target.value)}
           placeholder="Optional link you're posting (paste the exact URL)"
-          className="w-full bg-transparent text-sm text-white/80 placeholder:text-white/25 focus:outline-none"
+          className="w-full min-w-0 bg-transparent text-sm text-white/80 placeholder:text-white/25 focus:outline-none"
         />
       </div>
 
       <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
         <label className="flex cursor-pointer items-center justify-between gap-2 rounded-2xl border border-white/10 bg-black/20 px-3.5 py-2.5">
-          <span className="flex items-center gap-2 text-sm text-white/70">
-            <Users className="h-4 w-4 text-white/35" />
-            Reply to a mutual follower
+          <span className="flex min-w-0 items-center gap-2 text-sm text-white/70">
+            <Users className="h-4 w-4 shrink-0 text-white/35" />
+            <span className="truncate">Reply to a mutual follower</span>
           </span>
           <input
             type="checkbox"
             checked={isReplyToMutual}
             onChange={(e) => setIsReplyToMutual(e.target.checked)}
-            className="h-4 w-4 accent-besc-500"
+            className="h-4 w-4 shrink-0 accent-besc-500"
           />
         </label>
 
         <label className="flex cursor-pointer items-center justify-between gap-2 rounded-2xl border border-white/10 bg-black/20 px-3.5 py-2.5">
-          <span className="flex items-center gap-2 text-sm text-white/70">
-            <Ban className="h-4 w-4 text-white/35" />
-            Contains sensitive media
+          <span className="flex min-w-0 items-center gap-2 text-sm text-white/70">
+            <Ban className="h-4 w-4 shrink-0 text-white/35" />
+            <span className="truncate">Contains sensitive media</span>
           </span>
           <input
             type="checkbox"
             checked={nsfw}
             onChange={(e) => setNsfw(e.target.checked)}
-            className="h-4 w-4 accent-besc-500"
+            className="h-4 w-4 shrink-0 accent-besc-500"
           />
         </label>
       </div>
@@ -306,16 +306,16 @@ export default function Composer({
           value={authorFollowers}
           onChange={(e) => setAuthorFollowers(e.target.value)}
           placeholder="Your follower count (optional — unlocks the cold-start boost check)"
-          className="w-full bg-transparent text-sm text-white/80 placeholder:text-white/25 focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          className="w-full min-w-0 bg-transparent text-sm text-white/80 placeholder:text-white/25 focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         />
       </div>
 
-      <div className="mt-4 flex items-center justify-between rounded-2xl border border-white/10 bg-black/20 px-3.5 py-2.5">
-        <span className="flex items-center gap-2 text-sm text-white/70">
-          <Repeat2 className="h-4 w-4 text-white/35" />
-          Posts already sent in this window
+      <div className="mt-4 flex items-center justify-between gap-2 rounded-2xl border border-white/10 bg-black/20 px-3.5 py-2.5">
+        <span className="flex min-w-0 items-center gap-2 text-sm text-white/70">
+          <Repeat2 className="h-4 w-4 shrink-0 text-white/35" />
+          <span className="truncate">Posts already sent in this window</span>
         </span>
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-3">
           <button
             type="button"
             onClick={() => setRecentPostsCount((c) => Math.max(0, c - 1))}
