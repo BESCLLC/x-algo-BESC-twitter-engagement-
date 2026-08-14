@@ -51,7 +51,25 @@ This is a standard Next.js app — Railway's Nixpacks builder detects it automat
    a monorepo service — set the service's **root directory** to `besc-engagement-checker/`).
 2. Railway runs `npm install && npm run build` and starts with `npm run start`, which
    binds to Railway's injected `PORT` automatically (see `package.json`'s `start` script).
-3. No environment variables or external services are required — everything runs
-   server-side in this one process.
+3. No environment variables or external services are required for the core scorer —
+   everything runs server-side in this one process.
 
 `railway.json` pins the build/start commands explicitly if you want them version-controlled.
+
+## Optional: AI-assisted rewrite candidates
+
+The deterministic scorer/optimizer above always runs and never needs any of this. On top
+of it, `/api/optimize` can optionally generate creative rewrite candidates with an LLM —
+every candidate is still scored and gated through the same deterministic scorer, so this
+only ever *suggests*, never decides (see `app/api/optimize/route.ts`).
+
+Two providers are supported; set env vars for either (or both — Gemini is preferred
+when both are configured, since it's hosted and doesn't carry the cold-start/CPU risk
+described in `ollama-service/README.md`):
+
+- **Gemini** (hosted, recommended): `GEMINI_API_KEY`, optionally `GEMINI_MODEL`
+  (defaults to `gemini-2.5-flash`).
+- **Ollama** (self-hosted, free): `OLLAMA_URL`, `OLLAMA_MODEL` — see
+  `ollama-service/README.md` for standing up the Railway service.
+
+Neither set → `/api/optimize` returns `aiStatus: "disabled"` and just the deterministic result.

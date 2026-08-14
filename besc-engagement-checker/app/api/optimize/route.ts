@@ -3,6 +3,7 @@ import { optimizePost } from "@/lib/optimize";
 import { parseAnalyzeRequest } from "@/lib/request";
 import { analyzePost, getCharLimit } from "@/lib/scoring";
 import { generateRewriteCandidates, ollamaConfigured } from "@/lib/ollama";
+import { generateRewriteCandidatesGemini, geminiConfigured } from "@/lib/gemini";
 import type { AICandidate, AIStatus, AnalyzeRequest } from "@/lib/types";
 
 export async function POST(req: NextRequest) {
@@ -20,16 +21,17 @@ export async function POST(req: NextRequest) {
 
   const result = optimizePost(parsed);
 
-  if (!ollamaConfigured()) {
+  // Gemini (hosted) is preferred over Ollama (self-hosted, CPU-bound) when
+  // both are configured — it's faster and doesn't carry the cold-start risk
+  // documented in lib/ollama.ts. Ollama stays available as a free fallback.
+  if (!geminiConfigured() && !ollamaConfigured()) {
     return NextResponse.json({ ...result, aiStatus: "disabled" satisfies AIStatus });
   }
 
   try {
-    const candidates = await generateRewriteCandidates(
-      result.optimizedText,
-      2,
-      getCharLimit(parsed.isVerified)
-    );
+    const candidates = geminiConfigured()
+      ? await generateRewriteCandidatesGemini(result.optimizedText, 2, getCharLimit(parsed.isVerified))
+      : await generateRewriteCandidates(result.optimizedText, 2, getCharLimit(parsed.isVerified));
     const scored: AICandidate[] = candidates
       .map((text) => ({ text, score: analyzePost({ ...parsed, text }).score }))
       .filter((c) => c.score > result.after.score)
@@ -48,7 +50,8 @@ export async function POST(req: NextRequest) {
     // deterministic optimizer — a failure here should never break the
     // response, just fall through and return the mechanical result with an
     // honest status instead of silently pretending AI wasn't attempted.
-    console.error("[optimize] Ollama rewrite failed:", err instanceof Error ? err.message : err);
+    const provider = geminiConfigured() ? "Gemini" : "Ollama";
+    console.error(`[optimize] ${provider} rewrite failed:`, err instanceof Error ? err.message : err);
     return NextResponse.json({ ...result, aiStatus: "error" satisfies AIStatus });
   }
 }
