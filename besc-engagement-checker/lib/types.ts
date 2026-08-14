@@ -56,6 +56,7 @@ export interface FeatureReport {
   hasReplyCTA: boolean;
   hasShareCTA: boolean;
   hasBoilerplateCTA: boolean;
+  hasAiSlopPhrasing: boolean;
   hasNumbers: boolean;
   hasThreadMarker: boolean;
   fillerWords: number;

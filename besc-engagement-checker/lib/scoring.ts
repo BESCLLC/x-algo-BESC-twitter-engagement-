@@ -50,6 +50,24 @@ export const OON_WEIGHT_FACTOR = 0.75;
 export const COLD_START_FOLLOWER_CAP = 1000;
 export const COLD_START_MAX_AGE_HOURS = 24; // 86400 secs
 export const COLD_START_MAX_POSITION_RATIO = 0.85;
+// home-mixer/params/param.rs — ColdStartImpressionThreshold: the boost only
+// applies while the post is still under this many views (home-mixer/scorers/
+// author_cold_start.rs:165,179), and only while it's already ranking in the
+// top COLD_START_MAX_POSITION_RATIO of scored candidates for that viewer —
+// the boost lifts an already-decent-scoring post up toward what's currently
+// sitting around rank 15 (ColdStartSlotMin/Max), not an automatic top slot.
+export const COLD_START_IMPRESSION_THRESHOLD = 1000;
+
+// home-mixer/params/param.rs — TopicOonWeightFactor: out-of-network reach on
+// a topic-matched surface is discounted harder (50%) than the generic OON
+// discount below (25%).
+export const TOPIC_OON_WEIGHT_FACTOR = 0.5;
+
+// home-mixer/params/param.rs — MinVideoDurationMs: a video under this length
+// gets its video-quality-view weight forced to 0.0 (home-mixer/util/
+// candidates_util.rs:19-40) — the VQV action row never fires at all,
+// regardless of how good the video is.
+export const MIN_VIDEO_DURATION_MS = 10_000;
 
 // X platform posting limits (not a repo-cited ranking weight — this is the
 // literal composer character cap). Free accounts: 280. X Premium: 4,000.
@@ -105,6 +123,31 @@ export const BOILERPLATE_PHRASES = [
   "comment your",
   "tag 3 friends",
   "tag a friend",
+];
+
+// abuse-enforcement-service/service-lib/rules/enforcement_post.yaml:39-44 —
+// content matching X's "llm_slop_post" classifier gets a RiskyHighVizReply
+// label (30-day TTL). This repo doesn't show what that label actually does
+// downstream (nothing in visibility-filtering consumes it, only the
+// enforcement service's own tests reference it), so treat this as "a label
+// gets attached, for a month, for something free to avoid" rather than a
+// citable drop/downrank the way the other risk flags are.
+export const AI_SLOP_PHRASES = [
+  "in today's fast-paced",
+  "in the ever-evolving",
+  "dive into",
+  "delve into",
+  "it's important to note",
+  "it's worth noting",
+  "unlock the power of",
+  "game-changer",
+  "game changer",
+  "seamless integration",
+  "embark on a journey",
+  "cutting-edge",
+  "revolutionize",
+  "testament to",
+  "navigating the",
 ];
 
 export const REPLY_CTA_PHRASES = [
@@ -171,6 +214,7 @@ export function extractFeatures(text: string, link: string): FeatureReport {
   const hasReplyCTA = REPLY_CTA_PHRASES.some((p) => lower.includes(p));
   const hasShareCTA = SHARE_CTA_PHRASES.some((p) => lower.includes(p));
   const hasBoilerplateCTA = BOILERPLATE_PHRASES.some((p) => lower.includes(p));
+  const hasAiSlopPhrasing = AI_SLOP_PHRASES.some((p) => lower.includes(p));
   const hasNumbers = /\d/.test(trimmed);
   const hasThreadMarker = /🧵|^1\/|^\(1\/|thread\b/i.test(trimmed);
 
@@ -209,6 +253,7 @@ export function extractFeatures(text: string, link: string): FeatureReport {
     hasReplyCTA,
     hasShareCTA,
     hasBoilerplateCTA,
+    hasAiSlopPhrasing,
     hasNumbers,
     hasThreadMarker,
     fillerWords: countFillerWords(trimmed),
@@ -262,6 +307,7 @@ function estimateActionProbabilities(
       Math.min(f.hashtags, 8) / 8 * 0.35 +
       Math.min(f.exclamationBursts, 4) / 4 * 0.3 +
       (f.hasBoilerplateCTA ? 0.45 : 0) +
+      (f.hasAiSlopPhrasing ? 0.2 : 0) +
       (f.urlRisk ? 0.35 : 0) +
       (f.mentions >= 4 ? 0.2 : 0)
   );
@@ -533,10 +579,10 @@ function buildRisks(f: FeatureReport, req: AnalyzeRequest): RiskFlag[] {
       severity: "critical",
       title: "Link may resolve to a low-quality / BAD URL verdict",
       detail: f.urlReason
-        ? `${f.urlReason} A "LOW_QUALITY" verdict gets downranked. If re-crawling turns up an actual "UNSAFE" verdict, though, the consequence is categorically worse: visibility-filtering applies MALICIOUS_URL_DROP/DO_NOT_AMPLIFY_DROP, which is a hard non-distribution drop for every non-author viewer, not a downrank.`
+        ? `${f.urlReason} A "LOW_QUALITY" verdict gets downranked. If re-crawling turns up an actual "UNSAFE" verdict, though, the consequence is categorically worse: visibility-filtering applies MALICIOUS_URL_DROP/DO_NOT_AMPLIFY_DROP, which is a hard non-distribution drop for every non-author viewer, not a downrank. And it doesn't stay contained to this one post — once a domain's verdict flips to BAD, the retroactive-labeling bot applies SPAM to every past tweet you've posted that shares that domain, not just new ones.`
         : "No risky link pattern detected in this draft.",
       source:
-        "botmaker-rules/scarecrow/bot/Tweet_Spam_High_Recall_RTF_All_Bad_URL_Sources.bot, LQ_Tweets_With_LQ_URL_Verdict_At_Mention_To_NonFollower_v2.bot, rtf_tweets_on_unsafe_verdict.bot (id 20790); visibility-filtering/rules/tweet_label_drops.rs:113-124",
+        "botmaker-rules/scarecrow/bot/Tweet_Spam_High_Recall_RTF_All_Bad_URL_Sources.bot, LQ_Tweets_With_LQ_URL_Verdict_At_Mention_To_NonFollower_v2.bot, rtf_tweets_on_unsafe_verdict.bot (id 20790), Tweet_Search_Blacklist_RTF_All_UNSAFE_URL_Sources.bot (id 20789), tweet_rtf_or_unrtf_on_bad_verdict.bot (id 2002); visibility-filtering/rules/tweet_label_drops.rs:113-124",
       triggered: f.urlRisk,
     },
     {
@@ -580,11 +626,11 @@ function buildRisks(f: FeatureReport, req: AnalyzeRequest): RiskFlag[] {
     {
       id: "nsfw-interstitial",
       severity: "critical",
-      title: "Sensitive media will be shown behind a click-through blur",
+      title: "Sensitive media: blurred for followers, fully dropped from recommendations",
       detail:
-        "Marked as sensitive media: viewers who haven't opted into sensitive content will see this post behind an interstitial instead of the media directly, which suppresses impulse engagement.",
+        "Marking media sensitive costs more than a blur. Followers see it behind a click-through interstitial (NsfwAuthorInterstitialRule) — but for everyone else, TweetNsfwUserDropRule removes it from recommendations entirely, on an out-of-network surface that runs a much longer list of drop rules than followers ever see. That's a hard cap on reach beyond your existing audience, not just suppressed impulse engagement.",
       source:
-        "visibility-filtering/rules/nsfw_interstitial.rs: NSFW_HIGH_PRECISION_INTERSTITIAL / NsfwAuthorInterstitialRule",
+        "visibility-filtering/rules/nsfw_interstitial.rs: NSFW_HIGH_PRECISION_INTERSTITIAL / NsfwAuthorInterstitialRule (both surfaces); visibility-filtering/rules/tweet_flag_rules.rs:35-44 TWEET_NSFW_USER_DROP, wired OON-only at registry.rs:145",
       triggered: req.nsfw,
     },
     {
@@ -613,9 +659,11 @@ function buildRisks(f: FeatureReport, req: AnalyzeRequest): RiskFlag[] {
       id: "oon-discount",
       severity: "info",
       title: "Reach beyond your followers is discounted by 25%",
-      detail:
-        "Every post is scored at full strength for your own followers. For everyone else (out-of-network recommendation), the final score is multiplied by 0.75, and that surface also runs extra spam/abuse-only drop rules your followers never see.",
-      source: "home-mixer/params/param.rs: OonWeightFactor = 0.75",
+      detail: `Every post is scored at full strength for your own followers. For everyone else (out-of-network recommendation), the final score is multiplied by 0.75, and that surface also runs extra spam/abuse-only drop rules your followers never see. If a post lands on a topic-matched recommendation surface specifically, the discount is steeper still — ${(
+        (1 - TOPIC_OON_WEIGHT_FACTOR) *
+        100
+      ).toFixed(0)}% off, not 25%.`,
+      source: "home-mixer/params/param.rs: OonWeightFactor = 0.75, TopicOonWeightFactor = 0.5",
       triggered: true,
     },
   ];
@@ -631,16 +679,16 @@ function buildRisks(f: FeatureReport, req: AnalyzeRequest): RiskFlag[] {
       detail: eligible
         ? `With ${req.authorFollowers.toLocaleString()} followers (≤ ${COLD_START_FOLLOWER_CAP.toLocaleString()} cap) and posted ${
             ageHours < 1 ? "just now" : `${ageHours.toFixed(0)}h ago`
-          } (≤ ${COLD_START_MAX_AGE_HOURS}h window), this post is eligible to be force-boosted into a top slot for some viewers, within the top ${(
+          } (≤ ${COLD_START_MAX_AGE_HOURS}h window), this post can get a real boost for some viewers — but it's not an automatic top slot. It first has to already be ranking somewhere in the top ${(
             COLD_START_MAX_POSITION_RATIO * 100
           ).toFixed(
             0
-          )}% of ranked positions, bypassing the normal weighted-score ranking entirely. This is separate from, and on top of, the BESC Score above.`
-        : `Cold-start force-boosting only kicks in under ${COLD_START_FOLLOWER_CAP.toLocaleString()} followers and within a ${COLD_START_MAX_AGE_HOURS}h posting window. At ${req.authorFollowers.toLocaleString()} followers${
+          )}% of that viewer's scored candidates on its own merits; only then does the boost lift its score up to match whatever's currently sitting around rank 15. And it only applies while the post is still under ${COLD_START_IMPRESSION_THRESHOLD.toLocaleString()} total views — once it crosses that, cold-start stops touching it. This is separate from, and on top of, the BESC Score above.`
+        : `Cold-start boosting only kicks in under ${COLD_START_FOLLOWER_CAP.toLocaleString()} followers and within a ${COLD_START_MAX_AGE_HOURS}h posting window. At ${req.authorFollowers.toLocaleString()} followers${
             ageHours > COLD_START_MAX_AGE_HOURS ? ` and ${ageHours.toFixed(0)}h old` : ""
           }, this post doesn't currently qualify.`,
       source:
-        "home-mixer/scorers/author_cold_start.rs:86-91,156-192; home-mixer/params/param.rs:638-655 (ColdStartFollowerCap=1000, ColdStartMaxPostAgeSecs=86400, LowImpressionsMaxPositionRatio=0.85)",
+        "home-mixer/scorers/author_cold_start.rs:86-91,130-192; home-mixer/params/param.rs (ColdStartFollowerCap=1000, ColdStartMaxPostAgeSecs=86400, ColdStartImpressionThreshold=1000, LowImpressionsMaxPositionRatio=0.85, ColdStartSlotMin/Max=15/16)",
       triggered: eligible,
     });
   }
@@ -667,6 +715,26 @@ function buildTips(f: FeatureReport, req: AnalyzeRequest, risks: RiskFlag[]): Ti
       title: `Cut ${f.fillerWords} filler word${f.fillerWords > 1 ? "s" : ""} ("very", "just", "actually"...)`,
       detail:
         "Hedges and filler words dilute a claim without adding information. Tighter, more direct phrasing reads as more confident and holds attention better.",
+      impact: "medium",
+    });
+  }
+
+  if (f.hasAiSlopPhrasing) {
+    tips.push({
+      id: "cut-ai-slop",
+      title: 'Cut the stock AI phrasing ("delve into", "game-changer", "unlock the power of"...)',
+      detail:
+        "X's abuse-enforcement pipeline has a classifier category specifically for this (\"llm_slop_post\") that attaches a 30-day label to posts matching it. This repo doesn't show exactly what that label restricts downstream, but a label that exists purely to flag AI-generated-sounding writing isn't neutral — and it's free to just write it in your own words instead.",
+      impact: "medium",
+    });
+  }
+
+  if (req.mediaType === "video") {
+    tips.push({
+      id: "video-min-duration",
+      title: `Make sure the video runs ${(MIN_VIDEO_DURATION_MS / 1000).toFixed(0)}s or longer`,
+      detail:
+        "Video-quality-view is a real scored action, but its weight is forced to exactly 0.0 for any video under this length — a short clip earns nothing from that signal no matter how good it is.",
       impact: "medium",
     });
   }
