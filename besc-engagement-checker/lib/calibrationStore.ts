@@ -31,7 +31,12 @@ export interface BackfillResult {
  * recommendations entirely), so mixing them in would teach the model that
  * whatever replies happen to look like suppresses reach.
  */
-export async function backfillFromTimeline(handle: string): Promise<BackfillResult> {
+export async function backfillFromTimeline(
+  handle: string,
+  // Injectable for the same reason syncTrackedPosts takes its fetchers: it
+  // makes the insert/pagination logic testable without live network calls.
+  fetchPage: typeof fetchUserTimelinePage = fetchUserTimelinePage
+): Promise<BackfillResult> {
   const normalized = handle.toLowerCase();
   let cursor: string | undefined;
   let fetched = 0;
@@ -39,7 +44,7 @@ export async function backfillFromTimeline(handle: string): Promise<BackfillResu
   const seenCursors = new Set<string>();
 
   for (let page = 0; page < MAX_BACKFILL_PAGES && fetched < BACKFILL_TARGET_POSTS; page++) {
-    const { posts, nextCursor } = await fetchUserTimelinePage(normalized, cursor);
+    const { posts, nextCursor } = await fetchPage(normalized, cursor);
     if (posts.length === 0) break;
     fetched += posts.length;
 
@@ -57,7 +62,13 @@ export async function backfillFromTimeline(handle: string): Promise<BackfillResu
             media_type, is_reply, source, tweet_id, matched_at, posted_at,
             metrics_updated_at, views, likes, retweets, replies, quotes, bookmarks)
          VALUES ($1,$2,0,'',$3,$4,FALSE,'backfill',$5,NOW(),$6,NOW(),$7,$8,$9,$10,$11,$12)
-         ON CONFLICT (tweet_id) DO NOTHING
+         -- tracked_posts_tweet_idx is a PARTIAL unique index (WHERE tweet_id
+         -- IS NOT NULL, so unpublished drafts don't collide on NULL). Postgres
+         -- will not infer a partial index for ON CONFLICT unless the statement
+         -- repeats its predicate — without this it fails outright with
+         -- "no unique or exclusion constraint matching the ON CONFLICT
+         -- specification".
+         ON CONFLICT (tweet_id) WHERE tweet_id IS NOT NULL DO NOTHING
          RETURNING id`,
         [
           normalized,
