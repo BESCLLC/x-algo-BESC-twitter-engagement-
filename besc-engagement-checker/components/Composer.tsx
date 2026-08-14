@@ -21,6 +21,7 @@ import {
   Undo2,
   Reply,
   Copy,
+  ChevronDown,
 } from "lucide-react";
 import type {
   AnalyzeRequest,
@@ -384,10 +385,15 @@ export default function Composer({
         <button
           type="button"
           onClick={() => setShowGenerate((s) => !s)}
-          className="flex items-center gap-1.5 text-xs font-medium text-besc-300 transition-colors hover:text-besc-200"
+          className="flex w-full items-center justify-between gap-2 rounded-2xl border border-besc-400/40 bg-besc-500/10 px-3.5 py-3 text-sm font-medium text-besc-200 transition-colors hover:bg-besc-500/15"
         >
-          <Sparkles className="h-3.5 w-3.5" />
-          {showGenerate ? "Hide idea generator" : "Don't have a draft? Generate one from an idea"}
+          <span className="flex items-center gap-1.5">
+            <Sparkles className="h-4 w-4 shrink-0" />
+            {showGenerate ? "Hide idea generator" : "Don't have a draft? Generate one from an idea"}
+          </span>
+          <ChevronDown
+            className={`h-4 w-4 shrink-0 transition-transform ${showGenerate ? "rotate-180" : ""}`}
+          />
         </button>
 
         {showGenerate && (
@@ -395,9 +401,9 @@ export default function Composer({
             <textarea
               value={contextIdea}
               onChange={(e) => setContextIdea(e.target.value)}
-              placeholder="What do you want to post about? Rough notes are fine — e.g. &quot;shipped dark mode, users have been asking for months&quot;"
-              rows={2}
-              className="w-full resize-none rounded-xl border border-white/10 bg-black/30 p-3 text-sm text-white/85 placeholder:text-white/25 focus:border-besc-400/50 focus:outline-none"
+              placeholder="What do you want to post about? Rough notes are fine."
+              rows={3}
+              className="w-full resize-none rounded-xl border border-white/10 bg-black/30 p-3 text-[15px] leading-relaxed text-white/85 placeholder:text-white/25 focus:border-besc-400/50 focus:outline-none"
             />
             <button
               type="button"
