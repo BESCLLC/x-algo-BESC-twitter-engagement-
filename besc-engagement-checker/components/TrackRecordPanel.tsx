@@ -11,8 +11,11 @@ import {
   CheckCircle2,
   Brain,
   AtSign,
+  Clock3,
+  ChevronDown,
 } from "lucide-react";
 import type { CalibrationSide, TrackRecord, TrackSummary, TrackedPost } from "@/lib/types";
+import type { TimingInsights } from "@/lib/timing";
 
 function compact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -27,7 +30,8 @@ export default function TrackRecordPanel({
   handle: string;
   onHandleChange?: (h: string) => void;
 }) {
-  const [record, setRecord] = useState<TrackRecord & { enabled: boolean } | null>(null);
+  const [record, setRecord] = useState<(TrackRecord & { enabled: boolean; timing?: TimingInsights }) | null>(null);
+  const [showPosts, setShowPosts] = useState(false);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,7 +85,8 @@ export default function TrackRecordPanel({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/track?handle=${encodeURIComponent(handle.trim())}`);
+      const tz = new Date().getTimezoneOffset();
+      const res = await fetch(`/api/track?handle=${encodeURIComponent(handle.trim())}&tz=${tz}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Couldn't load your track record");
       setRecord(data);
@@ -228,6 +233,7 @@ export default function TrackRecordPanel({
       )}
 
       {summary && <Summary summary={summary} />}
+      {record?.timing && <Timing timing={record.timing} />}
 
       {loading && posts.length === 0 ? (
         <p className="mt-4 text-sm text-white/35">Loading…</p>
@@ -237,12 +243,98 @@ export default function TrackRecordPanel({
           <span className="text-besc-300">Track this post</span> before you publish it.
         </p>
       ) : (
-        <ul className="mt-4 space-y-2.5">
-          {posts.map((post) => (
-            <PostRow key={post.id} post={post} onRemove={() => remove(post.id)} />
-          ))}
-        </ul>
+        <>
+          <button
+            type="button"
+            onClick={() => setShowPosts((v) => !v)}
+            className="mt-4 flex w-full items-center justify-between gap-2 rounded-2xl border border-white/10 bg-white/[0.02] px-3.5 py-2.5 text-xs font-medium text-white/55 transition-colors hover:text-white/80"
+          >
+            <span>
+              {showPosts ? "Hide" : "Show"} the {posts.length} post{posts.length === 1 ? "" : "s"} behind this
+            </span>
+            <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${showPosts ? "rotate-180" : ""}`} />
+          </button>
+          {showPosts && (
+            <ul className="mt-2.5 space-y-2.5">
+              {posts.map((post) => (
+                <PostRow key={post.id} post={post} onRemove={() => remove(post.id)} />
+              ))}
+            </ul>
+          )}
+        </>
       )}
+    </div>
+  );
+}
+
+function Timing({ timing }: { timing: TimingInsights }) {
+  if (timing.n < timing.minimumForInsights) {
+    return (
+      <p className="mt-3 text-[12.5px] leading-relaxed text-white/40">
+        Needs {timing.minimumForInsights - timing.n} more measured posts before posting-time
+        patterns mean anything — timing splits the data into far more buckets than content does.
+      </p>
+    );
+  }
+
+  const rows = [
+    { kind: "Time of day", buckets: timing.hourBlocks },
+    { kind: "Gap since your last post", buckets: timing.gaps },
+    { kind: "Day of week", buckets: timing.weekdays },
+  ].filter((r) => r.buckets.length > 0);
+
+  return (
+    <div className="mt-3 rounded-xl border border-white/10 bg-black/25 p-3.5">
+      <p className="flex items-center gap-1.5 text-xs font-semibold text-white/70">
+        <Clock3 className="h-3.5 w-3.5 text-besc-300" />
+        When you post
+      </p>
+
+      {timing.best ? (
+        <p className="mt-2 text-[12.5px] leading-relaxed text-besc-100/85">
+          Your posts <span className="font-semibold">{timing.best.label}</span> get{" "}
+          <span className="font-mono">{timing.best.lift.toFixed(2)}×</span> your median views
+          ({timing.best.n} posts). Median across everything: {timing.overallMedianViews.toLocaleString()} views.
+        </p>
+      ) : (
+        <p className="mt-2 text-[12.5px] leading-relaxed text-white/45">
+          No posting time stands out — every window lands within normal variation of your{" "}
+          {timing.overallMedianViews.toLocaleString()}-view median. That's a real answer:
+          for your account, when you post isn't the lever.
+        </p>
+      )}
+
+      <div className="mt-3 space-y-3">
+        {rows.map((row) => (
+          <div key={row.kind}>
+            <p className="text-[10.5px] uppercase tracking-wide text-white/30">{row.kind}</p>
+            <ul className="mt-1 space-y-1">
+              {row.buckets.map((b) => (
+                <li key={b.label} className="flex items-baseline justify-between gap-3 text-[12px]">
+                  <span className="min-w-0 truncate text-white/55">{b.label}</span>
+                  <span className="shrink-0 font-mono tabular-nums text-white/45">
+                    {b.medianViews.toLocaleString()}
+                    <span
+                      className={`ml-2 ${
+                        (b.lift ?? 1) >= 1.25 ? "text-besc-300" : (b.lift ?? 1) <= 0.8 ? "text-danger/80" : "text-white/25"
+                      }`}
+                    >
+                      {b.lift === null ? "—" : `${b.lift.toFixed(2)}×`}
+                    </span>
+                    <span className="ml-1.5 text-white/20">n={b.n}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+
+      <p className="mt-2.5 text-[11px] leading-relaxed text-white/35">
+        Correlation, not cause — if you post announcements in the morning and idle notes at
+        midnight, this will read as a time pattern when it's really about content. Median views
+        per bucket, in your local time.
+      </p>
     </div>
   );
 }

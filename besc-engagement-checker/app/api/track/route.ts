@@ -5,6 +5,7 @@ import {
   buildTrackSummary,
   deleteTrackedPost,
   listTrackedPosts,
+  loadTimingInsights,
   saveTrackedPost,
 } from "@/lib/tracking";
 import { parseHandle } from "@/lib/twitter-import";
@@ -34,8 +35,14 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const posts = await listTrackedPosts(handle);
-    return NextResponse.json({ enabled: true, posts, summary: buildTrackSummary(posts) });
+    // Browser-style offset, so hour-of-day buckets land in the author's local
+    // time — "post in the morning" is only actionable where they actually live.
+    const tzOffset = Number(req.nextUrl.searchParams.get("tz")) || 0;
+    const [posts, timing] = await Promise.all([
+      listTrackedPosts(handle),
+      loadTimingInsights(handle, tzOffset),
+    ]);
+    return NextResponse.json({ enabled: true, posts, summary: buildTrackSummary(posts), timing });
   } catch (err) {
     console.error("[track] list failed:", err instanceof Error ? err.message : err);
     return NextResponse.json({ error: "Couldn't load your tracked posts." }, { status: 500 });
@@ -97,8 +104,14 @@ export async function DELETE(req: NextRequest) {
   try {
     // Scoped by handle as well as id so one handle can't delete another's row.
     await deleteTrackedPost(handle, id);
-    const posts = await listTrackedPosts(handle);
-    return NextResponse.json({ enabled: true, posts, summary: buildTrackSummary(posts) });
+    // Browser-style offset, so hour-of-day buckets land in the author's local
+    // time — "post in the morning" is only actionable where they actually live.
+    const tzOffset = Number(req.nextUrl.searchParams.get("tz")) || 0;
+    const [posts, timing] = await Promise.all([
+      listTrackedPosts(handle),
+      loadTimingInsights(handle, tzOffset),
+    ]);
+    return NextResponse.json({ enabled: true, posts, summary: buildTrackSummary(posts), timing });
   } catch (err) {
     console.error("[track] delete failed:", err instanceof Error ? err.message : err);
     return NextResponse.json({ error: "Couldn't remove that tracked post." }, { status: 500 });

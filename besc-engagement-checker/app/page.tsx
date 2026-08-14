@@ -159,6 +159,8 @@ export default function Home() {
                   </div>
                 </div>
 
+                <TrackRecordPanel key={trackVersion} handle={handle} onHandleChange={setHandle} />
+
                 <TipsPanel tips={result.tips} />
                 <RiskPanel risks={result.risks} />
                 <SignalBreakdown actions={result.actions} />
@@ -181,10 +183,6 @@ export default function Home() {
             )}
           </AnimatePresence>
         </div>
-      </section>
-
-      <section className="mx-auto max-w-7xl px-5 pb-24 sm:px-8">
-        <TrackRecordPanel key={trackVersion} handle={handle} onHandleChange={setHandle} />
       </section>
 
       <footer className="mx-auto flex max-w-7xl flex-col items-center gap-5 px-5 pb-14 pt-6 sm:px-8">

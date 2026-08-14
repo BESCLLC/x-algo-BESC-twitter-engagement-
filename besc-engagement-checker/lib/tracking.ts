@@ -2,6 +2,7 @@ import { query } from "./db";
 import { fetchTweetMetrics, fetchUserTimeline, type TimelinePost } from "./twitter-import";
 import { findBestMatch } from "./textMatch";
 import { optimizerRuleLabels } from "./optimize";
+import { buildTimingInsights, type TimingInsights, type TimingSample } from "./timing";
 import type {
   CalibrationSide,
   FixInsight,
@@ -212,6 +213,27 @@ export async function syncTrackedPosts(
   }
 
   return { matched, refreshed };
+}
+
+/**
+ * Timing uses the author's whole measured history, not the 100-post page the
+ * list view shows — it slices the data into far more buckets than the content
+ * model does, so it needs every sample available.
+ */
+export async function loadTimingInsights(
+  handle: string,
+  tzOffsetMinutes = 0
+): Promise<TimingInsights> {
+  const rows = await query<{ posted_at: Date | null; views: string | number | null }>(
+    `SELECT posted_at, views FROM tracked_posts
+     WHERE author_handle = $1 AND views > 0 AND posted_at IS NOT NULL AND is_reply = FALSE
+     ORDER BY posted_at DESC LIMIT 2000`,
+    [handle.toLowerCase()]
+  );
+  const samples: TimingSample[] = rows
+    .filter((r) => r.posted_at)
+    .map((r) => ({ postedAt: r.posted_at!.toISOString(), views: num(r.views) }));
+  return buildTimingInsights(samples, tzOffsetMinutes);
 }
 
 export function engagementsOf(m: TrackedPostMetrics): number {
