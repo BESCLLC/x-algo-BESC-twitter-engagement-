@@ -116,22 +116,12 @@ export default function Home() {
 
                 <div className="glass-panel flex flex-col items-center gap-6 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
                   <ScoreGauge score={result.score} grade={result.grade} />
-                  <div className="grid w-full grid-cols-2 gap-3 sm:w-auto sm:grid-cols-1 sm:gap-4">
+                  <div className="grid w-full grid-cols-2 gap-3 sm:w-auto sm:gap-4">
                     <Stat
                       label="Author diversity ×"
                       value={result.authorDiversityMultiplier.toFixed(2)}
                     />
                     <Stat label="Out-of-network ×" value={result.oonWeightFactor.toFixed(2)} />
-                    <Stat
-                      label="Positive signal"
-                      value={`+${result.positiveContribution.toFixed(2)}`}
-                      tone="up"
-                    />
-                    <Stat
-                      label="Negative signal"
-                      value={result.negativeContribution.toFixed(2)}
-                      tone="down"
-                    />
                   </div>
                 </div>
 
@@ -174,25 +164,11 @@ export default function Home() {
   );
 }
 
-function Stat({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: "up" | "down";
-}) {
+function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="glass-inset px-4 py-3">
       <p className="text-[11px] uppercase tracking-wide text-white/35">{label}</p>
-      <p
-        className={`mt-0.5 font-mono text-lg font-semibold tabular-nums ${
-          tone === "up" ? "text-besc-300" : tone === "down" ? "text-danger" : "text-white/85"
-        }`}
-      >
-        {value}
-      </p>
+      <p className="mt-0.5 font-mono text-lg font-semibold tabular-nums text-white/85">{value}</p>
     </div>
   );
 }
