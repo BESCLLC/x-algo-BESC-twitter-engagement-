@@ -72,7 +72,7 @@ async function countRecentPosts(authorHandle: string, authorRestId: string): Pro
 async function fetchRawTweet(url: string): Promise<{ id: string; raw: Raw }> {
   const id = parseTweetId(url);
   if (!id) {
-    throw new Error("Couldn't find a tweet id in that link — paste a full x.com/…/status/… URL.");
+    throw new Error("Couldn't find a tweet id in that link. Paste a full x.com/…/status/… URL.");
   }
   const raw = await callVee3Tool<Raw>("x-twitter_tweet_info", { id });
   return { id, raw };
@@ -162,6 +162,9 @@ export async function lookupAuthor(handleInput: string): Promise<AuthorLookupRes
 
   const authorHandle = pick<string>(user, ["user_name", "screen_name", "username"], "");
   if (!authorHandle) {
+    // TEMP: log the raw payload so the real field names can be confirmed
+    // from Railway's runtime logs instead of guessing again.
+    console.log(`[lookup-author debug] handle=${handle} raw=`, JSON.stringify(raw));
     throw new Error("Vee3 didn't return account info for that handle.");
   }
 
