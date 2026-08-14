@@ -509,6 +509,12 @@ export default function Composer({
 
           {optimizeResult.aiStatus === "found" && optimizeResult.aiCandidates && (
             <div className="mt-2.5 space-y-2.5">
+              <p className="text-[11px] leading-relaxed text-warn/80">
+                Read this before using it. The AI can rephrase a claim in a way that changes its
+                meaning (e.g. turning a pending status into a done one) even when told not to.
+                A higher score only means it fits the algorithm's signals better, not that it's
+                factually accurate.
+              </p>
               {optimizeResult.aiCandidates.map((candidate, i) => (
                 <div key={i} className="rounded-xl border border-white/10 bg-black/25 p-3">
                   <div className="mb-1.5 flex items-center justify-between">
