@@ -15,6 +15,16 @@ const REQUEST_TIMEOUT_MS = 100000;
 // short rewrite variants need well under this many tokens.
 const MAX_OUTPUT_TOKENS = 250;
 
+// Ollama's own CPU thread auto-detection is a known-unreliable in containers
+// (it can under-count what's actually schedulable), which is a plausible
+// explanation for a service with 24 real vCPUs still hitting the same
+// generation timeout regardless of model size. num_thread is a documented
+// per-request option on /api/generate, more reliable than guessing at
+// server-level env var names that vary across Ollama versions. Override via
+// OLLAMA_NUM_THREAD if the actual usable core count differs from vCPUs shown
+// in Railway (e.g. due to container CPU quota vs. host core count).
+const NUM_THREAD = Number(process.env.OLLAMA_NUM_THREAD) || 24;
+
 export function ollamaConfigured(): boolean {
   return Boolean(process.env.OLLAMA_URL && process.env.OLLAMA_MODEL);
 }
@@ -125,7 +135,7 @@ export async function generateRewriteCandidates(
         model,
         prompt: buildPrompt(text, numVariants, charLimit),
         stream: false,
-        options: { temperature: 0.8, num_predict: MAX_OUTPUT_TOKENS },
+        options: { temperature: 0.8, num_predict: MAX_OUTPUT_TOKENS, num_thread: NUM_THREAD },
       }),
       signal: controller.signal,
     });
