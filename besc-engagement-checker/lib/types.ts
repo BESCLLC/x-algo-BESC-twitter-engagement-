@@ -56,6 +56,24 @@ export interface FeatureReport {
   urlReason: string | null;
 }
 
+export interface TweetImportResult {
+  text: string;
+  mediaType: MediaType;
+  link: string;
+  authorHandle: string;
+  authorName: string;
+  authorFollowers: number;
+  authorVerified: boolean;
+  recentPostsCount: number;
+  realMetrics: {
+    likes: number;
+    retweets: number;
+    replies: number;
+    quotes: number;
+    bookmarks: number;
+  };
+}
+
 export interface ScoreResult {
   score: number;
   grade: string;

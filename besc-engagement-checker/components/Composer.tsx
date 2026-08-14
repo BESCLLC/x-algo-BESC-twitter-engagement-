@@ -1,8 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Image as ImageIcon, Film, Sticker, Ban, Link2, Users, Repeat2 } from "lucide-react";
-import type { AnalyzeRequest, MediaType, ScoreResult } from "@/lib/types";
+import {
+  Image as ImageIcon,
+  Film,
+  Sticker,
+  Ban,
+  Link2,
+  Users,
+  Repeat2,
+  Download,
+  Loader2,
+} from "lucide-react";
+import type { AnalyzeRequest, MediaType, ScoreResult, TweetImportResult } from "@/lib/types";
 
 const MEDIA_OPTIONS: { id: MediaType; label: string; icon: typeof ImageIcon }[] = [
   { id: "none", label: "Text only", icon: Ban },
@@ -16,9 +26,11 @@ const CHAR_LIMIT = 280;
 export default function Composer({
   onResult,
   onLoading,
+  onImport,
 }: {
   onResult: (r: ScoreResult | null) => void;
   onLoading: (b: boolean) => void;
+  onImport?: (r: TweetImportResult | null) => void;
 }) {
   const [text, setText] = useState(
     "Just shipped something I've been heads-down on for weeks. What's one thing you'd want it to do next?"
@@ -30,6 +42,36 @@ export default function Composer({
   const [recentPostsCount, setRecentPostsCount] = useState(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
+
+  const [importUrl, setImportUrl] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+
+  async function importFromUrl() {
+    if (!importUrl.trim() || importing) return;
+    setImporting(true);
+    setImportError(null);
+    onImport?.(null);
+    try {
+      const res = await fetch("/api/fetch-tweet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: importUrl.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Import failed");
+      const imported = data as TweetImportResult;
+      setText(imported.text);
+      setMediaType(imported.mediaType);
+      setLink(imported.link);
+      setRecentPostsCount(imported.recentPostsCount);
+      onImport?.(imported);
+    } catch (e) {
+      setImportError((e as Error).message);
+    } finally {
+      setImporting(false);
+    }
+  }
 
   async function analyze() {
     if (!text.trim()) {
@@ -92,9 +134,33 @@ export default function Composer({
         </span>
       </div>
 
+      <div className="mb-4 flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-3.5 py-2.5">
+        <Download className="h-4 w-4 shrink-0 text-white/30" />
+        <input
+          value={importUrl}
+          onChange={(e) => setImportUrl(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && importFromUrl()}
+          placeholder="Or paste a live x.com/…/status/… link to score a real post"
+          className="w-full bg-transparent text-sm text-white/80 placeholder:text-white/25 focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={importFromUrl}
+          disabled={!importUrl.trim() || importing}
+          className="flex shrink-0 items-center gap-1.5 rounded-full border border-besc-400/40 bg-besc-500/10 px-3 py-1 text-xs font-medium text-besc-200 transition-colors hover:bg-besc-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {importing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+          Import
+        </button>
+      </div>
+      {importError && <p className="mb-4 -mt-2 text-xs text-danger">{importError}</p>}
+
       <textarea
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          onImport?.(null);
+        }}
         placeholder="What's happening?"
         rows={5}
         className="w-full resize-none rounded-2xl border border-white/10 bg-black/30 p-4 text-[15px] leading-relaxed text-white/90 placeholder:text-white/25 focus:border-besc-400/50 focus:outline-none focus:ring-2 focus:ring-besc-400/20"

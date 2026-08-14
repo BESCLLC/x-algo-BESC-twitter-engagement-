@@ -11,11 +11,13 @@ import SignalBreakdown from "@/components/SignalBreakdown";
 import RiskPanel from "@/components/RiskPanel";
 import TipsPanel from "@/components/TipsPanel";
 import SocialLinks from "@/components/SocialLinks";
-import type { ScoreResult } from "@/lib/types";
+import RealMetricsPanel from "@/components/RealMetricsPanel";
+import type { ScoreResult, TweetImportResult } from "@/lib/types";
 
 export default function Home() {
   const [result, setResult] = useState<ScoreResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [imported, setImported] = useState<TweetImportResult | null>(null);
 
   return (
     <main className="relative min-h-screen">
@@ -79,7 +81,7 @@ export default function Home() {
 
       <section className="mx-auto grid max-w-7xl gap-6 px-5 pb-24 sm:px-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:items-start">
         <div className="lg:sticky lg:top-6">
-          <Composer onResult={setResult} onLoading={setLoading} />
+          <Composer onResult={setResult} onLoading={setLoading} onImport={setImported} />
         </div>
 
         <div className="space-y-6">
@@ -110,6 +112,8 @@ export default function Home() {
                 transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
                 className="space-y-6"
               >
+                {imported && <RealMetricsPanel data={imported} />}
+
                 <div className="glass-panel flex flex-col items-center gap-6 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
                   <ScoreGauge score={result.score} grade={result.grade} />
                   <div className="grid w-full grid-cols-2 gap-3 sm:w-auto sm:grid-cols-1 sm:gap-4">
