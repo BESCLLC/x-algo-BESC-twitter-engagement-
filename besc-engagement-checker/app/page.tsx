@@ -14,6 +14,7 @@ import TipsPanel from "@/components/TipsPanel";
 import SocialLinks from "@/components/SocialLinks";
 import RealMetricsPanel from "@/components/RealMetricsPanel";
 import TrackRecordPanel from "@/components/TrackRecordPanel";
+import CalibrationBadge from "@/components/CalibrationBadge";
 import type { ScoreResult, TweetImportResult } from "@/lib/types";
 
 const HANDLE_STORAGE_KEY = "besc:handle";
@@ -52,26 +53,42 @@ export default function Home() {
             className="animate-rise text-balance font-display text-4xl font-bold leading-[1.05] tracking-tight sm:text-6xl [animation-delay:60ms]"
             style={{ animationFillMode: "backwards" }}
           >
-            Score your post before
-            <br className="hidden sm:block" /> the{" "}
-            <span className="text-gold">algorithm</span> scores it.
+            Write posts the{" "}
+            <span className="text-gold">algorithm</span>
+            <br className="hidden sm:block" /> actually rewards.
           </h1>
           <p
             className="animate-rise max-w-2xl text-balance text-[15px] leading-relaxed text-white/50 sm:text-base [animation-delay:120ms]"
             style={{ animationFillMode: "backwards" }}
           >
-            This isn&apos;t vibes-based advice. Every number below traces back to a
-            real weight or rule in this repo, the same{" "}
+            Draft it, generate it from a rough idea, or paste a live post. Every number
+            traces back to a real weight or rule in X&apos;s open-sourced{" "}
             <code className="rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[13px] text-white/70">
               RankingScorer
             </code>{" "}
-            weights and{" "}
+            and{" "}
             <code className="rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[13px] text-white/70">
               visibility-filtering
             </code>{" "}
-            rules that decide reach on X. Draft on the left, watch the score move on
-            the right.
+            rules — and once it has read your published results, the score stops being an
+            average and starts being about your account.
           </p>
+
+          <div className="animate-rise flex flex-wrap gap-2 [animation-delay:180ms]" style={{ animationFillMode: "backwards" }}>
+            {[
+              "Live score from the real weights",
+              "AI rewrites, gated by the scorer",
+              "Write from a rough idea",
+              "Learns from your real results",
+            ].map((c) => (
+              <span
+                key={c}
+                className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[11.5px] font-medium text-white/45"
+              >
+                {c}
+              </span>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -105,6 +122,12 @@ export default function Home() {
                 <p className="text-sm text-white/40">
                   {loading ? "Analyzing…" : "Start typing to see your live BESC Score."}
                 </p>
+                {!loading && (
+                  <p className="max-w-xs text-[12.5px] leading-relaxed text-white/25">
+                    No draft yet? Use the idea generator to write one, or paste a live
+                    x.com link to score a post that already exists.
+                  </p>
+                )}
               </motion.div>
             ) : (
               <motion.div
@@ -117,14 +140,22 @@ export default function Home() {
               >
                 {imported && <RealMetricsPanel data={imported} />}
 
-                <div className="glass-panel flex flex-col items-center gap-6 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
-                  <ScoreGauge score={result.score} grade={result.grade} />
-                  <div className="grid w-full grid-cols-2 gap-3 sm:w-auto sm:gap-4">
-                    <Stat
-                      label="Author diversity ×"
-                      value={result.authorDiversityMultiplier.toFixed(2)}
+                <div className="glass-panel p-6 sm:p-8">
+                  <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-center sm:justify-between">
+                    <ScoreGauge score={result.score} grade={result.grade} />
+                    <div className="grid w-full grid-cols-2 gap-3 sm:w-auto sm:gap-4">
+                      <Stat
+                        label="Author diversity ×"
+                        value={result.authorDiversityMultiplier.toFixed(2)}
+                      />
+                      <Stat label="Out-of-network ×" value={result.oonWeightFactor.toFixed(2)} />
+                    </div>
+                  </div>
+                  <div className="mt-5">
+                    <CalibrationBadge
+                      strength={result.calibrationStrength ?? 0}
+                      hasHandle={Boolean(handle.trim())}
                     />
-                    <Stat label="Out-of-network ×" value={result.oonWeightFactor.toFixed(2)} />
                   </div>
                 </div>
 
@@ -153,7 +184,7 @@ export default function Home() {
       </section>
 
       <section className="mx-auto max-w-7xl px-5 pb-24 sm:px-8">
-        <TrackRecordPanel key={trackVersion} handle={handle} />
+        <TrackRecordPanel key={trackVersion} handle={handle} onHandleChange={setHandle} />
       </section>
 
       <footer className="mx-auto flex max-w-7xl flex-col items-center gap-5 px-5 pb-14 pt-6 sm:px-8">

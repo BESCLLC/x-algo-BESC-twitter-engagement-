@@ -23,6 +23,7 @@ import {
   Copy,
   ChevronDown,
   Activity,
+  SlidersHorizontal,
 } from "lucide-react";
 import type {
   AnalyzeRequest,
@@ -188,6 +189,10 @@ export default function Composer({
     }
   }
 
+  // Collapsed by default: these are secondary metadata, and leaving them open
+  // buried the writing surface under three screens of toggles. The summary on
+  // the button means anything non-default is still visible at a glance.
+  const [showContext, setShowContext] = useState(false);
   const [showGenerate, setShowGenerate] = useState(false);
   const [contextIdea, setContextIdea] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -347,6 +352,20 @@ export default function Composer({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text, mediaType, link, isReply, hasMutualFollowAudience, nsfw, recentPostsCount, authorFollowers, postedHoursAgo, isVerified]);
+
+  // Surfaces whatever is set to something other than its default, so a
+  // collapsed panel never hides a setting that's changing the score.
+  const contextSummary = [
+    isReply ? "reply" : null,
+    hasMutualFollowAudience ? "mutual audience" : null,
+    nsfw ? "sensitive" : null,
+    isVerified ? "verified" : null,
+    link.trim() ? "link" : null,
+    recentPostsCount > 0 ? `${recentPostsCount} recent` : null,
+    handleInput.trim() ? `@${handleInput.trim().replace(/^@/, "")}` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
 
   const charLimit = getCharLimit(isVerified);
   const chars = text.length;
@@ -602,6 +621,23 @@ export default function Composer({
         })}
       </div>
 
+      <button
+        type="button"
+        onClick={() => setShowContext((v) => !v)}
+        className="mt-4 flex w-full items-center justify-between gap-2 rounded-2xl border border-white/10 bg-white/[0.02] px-3.5 py-2.5 text-xs font-medium text-white/55 transition-colors hover:text-white/80"
+      >
+        <span className="flex items-center gap-2">
+          <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" />
+          Post context &amp; your account
+          {contextSummary && <span className="text-white/30">· {contextSummary}</span>}
+        </span>
+        <ChevronDown
+          className={`h-4 w-4 shrink-0 transition-transform ${showContext ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      {showContext && (
+        <div>
       <div className="mt-4 flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-3.5 py-2.5">
         <Link2 className="h-4 w-4 shrink-0 text-white/30" />
         <input
@@ -731,6 +767,8 @@ export default function Composer({
           </button>
         </div>
       </div>
+        </div>
+      )}
 
       <button
         type="button"

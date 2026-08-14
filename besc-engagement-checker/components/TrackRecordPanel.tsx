@@ -10,6 +10,7 @@ import {
   Clock,
   CheckCircle2,
   Brain,
+  AtSign,
 } from "lucide-react";
 import type { CalibrationSide, TrackRecord, TrackSummary, TrackedPost } from "@/lib/types";
 
@@ -19,7 +20,13 @@ function compact(n: number): string {
   return String(n);
 }
 
-export default function TrackRecordPanel({ handle }: { handle: string }) {
+export default function TrackRecordPanel({
+  handle,
+  onHandleChange,
+}: {
+  handle: string;
+  onHandleChange?: (h: string) => void;
+}) {
   const [record, setRecord] = useState<TrackRecord & { enabled: boolean } | null>(null);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -132,11 +139,39 @@ export default function TrackRecordPanel({ handle }: { handle: string }) {
     return (
       <div className="glass-panel p-6">
         <Header />
-        <p className="mt-3 text-sm leading-relaxed text-white/45">
-          Add your @handle above to start tracking. Once you save a draft here and publish
-          it on X, this finds the real post and pulls its actual views and engagement — so
-          you can see whether the score is telling you the truth.
+        <p className="mt-3 max-w-2xl text-sm leading-relaxed text-white/45">
+          This is where the score stops being an average. Give it your handle and it reads
+          your published posts and their real numbers, then fits the score to what actually
+          works for your account — and checks its own predictions against every post you
+          publish from here.
         </p>
+        {/* Entered here rather than only in the composer's collapsed context
+            panel: this is where someone is standing when they want to
+            calibrate, and making them hunt for the field breaks the flow. */}
+        {onHandleChange && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const value = new FormData(e.currentTarget).get("handle");
+              if (typeof value === "string" && value.trim()) onHandleChange(value.trim());
+            }}
+            className="mt-4 flex max-w-md items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-3.5 py-2.5"
+          >
+            <AtSign className="h-4 w-4 shrink-0 text-white/30" />
+            <input
+              name="handle"
+              placeholder="yourhandle"
+              autoComplete="off"
+              className="w-full min-w-0 bg-transparent text-sm text-white/80 placeholder:text-white/25 focus:outline-none"
+            />
+            <button
+              type="submit"
+              className="shrink-0 rounded-full bg-besc-500 px-3.5 py-1.5 text-xs font-semibold text-black transition-colors hover:bg-besc-400"
+            >
+              Start
+            </button>
+          </form>
+        )}
       </div>
     );
   }
