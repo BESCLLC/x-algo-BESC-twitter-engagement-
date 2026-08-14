@@ -69,41 +69,89 @@ async function countRecentPosts(authorHandle: string, authorRestId: string): Pro
   }
 }
 
-export async function importTweet(url: string): Promise<TweetImportResult> {
+async function fetchRawTweet(url: string): Promise<{ id: string; raw: Raw }> {
   const id = parseTweetId(url);
   if (!id) {
     throw new Error("Couldn't find a tweet id in that link — paste a full x.com/…/status/… URL.");
   }
-
   const raw = await callVee3Tool<Raw>("x-twitter_tweet_info", { id });
+  return { id, raw };
+}
 
+function buildResult(raw: Raw, recentPostsCount: number): TweetImportResult {
   const text = pick<string>(raw, ["text", "full_text"], "");
   if (!text) {
     throw new Error("Vee3 didn't return any post text for that link.");
   }
 
   const author = pick<Raw>(raw, ["author", "user"], {});
-  const authorHandle = pick<string>(author, ["user_name", "screen_name", "username"], "");
-  const authorRestId = pick<string>(author, ["rest_id", "id"], "");
-
-  const recentPostsCount = await countRecentPosts(authorHandle, authorRestId);
 
   return {
     text,
     mediaType: detectMediaType(raw),
     link: firstExternalLink(raw),
-    authorHandle,
+    authorHandle: pick<string>(author, ["user_name", "screen_name", "username"], ""),
     authorName: pick<string>(author, ["name", "display_name"], ""),
     authorFollowers: Number(pick<number>(author, ["followers_count", "followers"], 0)) || 0,
     authorVerified: Boolean(pick<boolean>(author, ["is_blue_verified", "verified"], false)),
     recentPostsCount,
     postedHoursAgo: hoursSincePosted(raw),
     realMetrics: {
-      likes: Number(pick<number>(raw, ["like_count", "favorite_count", "public_metrics.like_count"], 0)) || 0,
-      retweets: Number(pick<number>(raw, ["retweet_count", "public_metrics.retweet_count"], 0)) || 0,
-      replies: Number(pick<number>(raw, ["reply_count", "public_metrics.reply_count"], 0)) || 0,
-      quotes: Number(pick<number>(raw, ["quote_count", "public_metrics.quote_count"], 0)) || 0,
-      bookmarks: Number(pick<number>(raw, ["bookmark_count", "public_metrics.bookmark_count"], 0)) || 0,
+      likes:
+        Number(
+          pick<number>(
+            raw,
+            ["like_count", "favorite_count", "likes", "public_metrics.like_count", "stats.like_count", "legacy.favorite_count"],
+            0
+          )
+        ) || 0,
+      retweets:
+        Number(
+          pick<number>(
+            raw,
+            ["retweet_count", "retweets", "public_metrics.retweet_count", "stats.retweet_count", "legacy.retweet_count"],
+            0
+          )
+        ) || 0,
+      replies:
+        Number(
+          pick<number>(
+            raw,
+            ["reply_count", "replies", "public_metrics.reply_count", "stats.reply_count", "legacy.reply_count"],
+            0
+          )
+        ) || 0,
+      quotes:
+        Number(
+          pick<number>(
+            raw,
+            ["quote_count", "quotes", "public_metrics.quote_count", "stats.quote_count", "legacy.quote_count"],
+            0
+          )
+        ) || 0,
+      bookmarks:
+        Number(
+          pick<number>(
+            raw,
+            ["bookmark_count", "bookmarks", "public_metrics.bookmark_count", "stats.bookmark_count", "legacy.bookmark_count"],
+            0
+          )
+        ) || 0,
     },
   };
+}
+
+export async function importTweet(url: string): Promise<TweetImportResult & { _rawDebug?: Raw }> {
+  const { raw, id } = await fetchRawTweet(url);
+
+  const author = pick<Raw>(raw, ["author", "user"], {});
+  const authorHandle = pick<string>(author, ["user_name", "screen_name", "username"], "");
+  const authorRestId = pick<string>(author, ["rest_id", "id"], "");
+  const recentPostsCount = await countRecentPosts(authorHandle, authorRestId);
+
+  // TEMP: surface the raw Vee3 payload (Railway logs + response body) so we
+  // can fix any field-name mismatches in buildResult() against ground truth.
+  console.log(`[fetch-tweet debug] id=${id} raw=`, JSON.stringify(raw));
+
+  return { ...buildResult(raw, recentPostsCount), _rawDebug: raw };
 }
