@@ -101,10 +101,15 @@ const URL_RE = /(https?:\/\/[^\s]+)|(\bwww\.[^\s]+)/gi;
 const MENTION_RE = /(^|\s)@[a-zA-Z0-9_]{1,15}/g;
 export const HASHTAG_RE = /(^|\s)#[a-zA-Z0-9_]+/g;
 
+// Deliberately excludes t.co. X rewrites EVERY link posted to it into a t.co
+// shortlink, so treating t.co as a suspicious redirect penalised every post
+// containing any link at all — which is the opposite of a spam signal. The
+// URL-verdict rules this models are about the reputation of the *destination*
+// domain, and X plainly doesn't distrust its own wrapper. A t.co link just
+// means the destination is unknowable from the text, which is neutral, not bad.
 const SHORTENER_HOSTS = [
   "bit.ly",
   "tinyurl.com",
-  "t.co",
   "goo.gl",
   "ow.ly",
   "buff.ly",
@@ -424,9 +429,17 @@ function estimateActionProbabilities(
       spamPenalty * 0.12
   );
 
-  const quote = clamp01(0.015 + (f.hasReplyCTA ? 0.05 : 0) + retweet * 0.4);
+  // Copy-link share is the heaviest action in the model, and it requires
+  // something concrete worth sending to a specific person. A two-word status
+  // update has nothing to pass on, but with no hashtags, links or caps it also
+  // trips no penalties — so it was scoring mid-range while genuinely
+  // informative posts scored lower. Absence of problems is not the same as
+  // presence of substance.
+  const substance = clamp01(0.25 + (Math.min(f.words, 20) / 20) * 0.75);
 
-  const share = clamp01(0.02 + (f.hasShareCTA ? 0.18 : 0) + retweet * 0.5);
+  const quote = clamp01((0.015 + (f.hasReplyCTA ? 0.05 : 0) + retweet * 0.4) * substance);
+
+  const share = clamp01((0.02 + (f.hasShareCTA ? 0.18 : 0) + retweet * 0.5) * substance);
   const shareViaDm = clamp01(share * 0.55);
   const shareViaCopyLink = clamp01(share * 0.4);
 
@@ -440,11 +453,23 @@ function estimateActionProbabilities(
     0.01 + favorite * 0.08 + reply * 0.06 - spamPenalty * 0.08
   );
 
-  const notInterested = clamp01(0.01 + spamPenalty * 0.22);
-  const blockAuthor = clamp01(0.002 + spamPenalty * 0.06);
-  const muteAuthor = clamp01(0.004 + spamPenalty * 0.1);
+  // These carry the three largest weights in the model (up to -234), and the
+  // real algorithm pairs those weights with genuinely tiny probabilities —
+  // people almost never report a post. Pairing huge weights with inflated
+  // probabilities made the negatives swamp everything else: a normal product
+  // update with a link and a few hashtags scored a flat 0, while a two-word
+  // post with no link scored 15. Real published posts with 300 views, 30 likes
+  // and no sign of trouble were being graded "High Risk".
+  //
+  // Scaled to plausible magnitudes. The ordering is unchanged — spammier
+  // drafts still lose more — but a clean post now loses ~0.1 points to
+  // negatives instead of ~10, and only a genuinely abusive one approaches the
+  // floor.
+  const notInterested = clamp01(0.002 + spamPenalty * 0.06);
+  const blockAuthor = clamp01(0.0002 + spamPenalty * 0.01);
+  const muteAuthor = clamp01(0.0005 + spamPenalty * 0.02);
   const report = clamp01(
-    0.0005 + (f.urlRisk ? 0.01 : 0) + spamPenalty * 0.02
+    0.00002 + (f.urlRisk ? 0.0003 : 0) + spamPenalty * 0.004
   );
   const notDwelled = clamp01(
     0.35 - lengthScore * 0.15 + spamPenalty * 0.2 + wordinessPenalty * 0.3
