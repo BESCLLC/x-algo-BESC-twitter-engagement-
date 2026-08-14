@@ -69,38 +69,25 @@ async function checkOllamaHealth(url: string, model: string): Promise<void> {
 // deterministic optimizer and every risk/tip cite) instead of a hand-picked
 // subset baked into prose — so the model is chasing the actual ranked
 // hierarchy of what matters, and this can't quietly drift out of sync with
-// the real scorer as weights change.
+// the real scorer as weights change. Kept as terse as possible: on CPU,
+// prefill time scales directly with prompt length, and a real deploy log
+// showed 683 input tokens from the old, more verbose version of this prompt
+// alone, before generation even starts.
 function buildPrompt(text: string, numVariants: number, charLimit: number): string {
-  return `You are optimizing an X (Twitter) post to score as high as possible against X's real "For You" ranking algorithm (RankingScorer). The final score is a weighted sum of predicted action probabilities — weight × P(action), summed across all actions. These are the real production weights, highest to lowest:
+  const boilerplateSample = BOILERPLATE_PHRASES.slice(0, 3).join('", "');
+  return `Rewrite an X post to score higher on a weighted-action ranking algorithm. Weights (weight x probability, summed):
++${WEIGHTS.shareViaCopyLink} share-via-copy-link (highest weight; needs a concrete hook/stat/story, not vague)
++${WEIGHTS.reply}/+${WEIGHTS.reply + WEIGHTS.bidirectionalReplyBoost} reply (end with a specific question fitting THIS content, not generic "thoughts?")
++${WEIGHTS.quote} quote, +${WEIGHTS.shareViaDm} DM-share, +${WEIGHTS.followAuthor} follow, +${WEIGHTS.share} share, +${WEIGHTS.retweet} repost, +${WEIGHTS.favorite} like (lowest, don't chase)
+${WEIGHTS.report} report, ${WEIGHTS.muteAuthor} mute, ${WEIGHTS.notInterested} not-interested, ${WEIGHTS.blockAuthor} block: triggered by ALL-CAPS, !!!/???, >2 hashtags, boilerplate like "${boilerplateSample}", shortened links.
+Also avoid filler words (very/just/actually/I think) and passive voice; open with the point, not a wind-up. Max ${charLimit.toLocaleString()} chars. Never invent facts/names/numbers; preserve every claim exactly.
 
-POSITIVE (chase these, ranked by value):
-- Share via copy link: ${WEIGHTS.shareViaCopyLink} (the single highest weight in the entire model). Needs a concrete, specific, screenshot-or-send-worthy claim, stat, or story beat — vague statements don't get copy-linked to a friend.
-- Reply: ${WEIGHTS.reply} (or ${WEIGHTS.reply + WEIGHTS.bidirectionalReplyBoost} inside a mutual-follow thread). End with a genuine, specific question or clear stance that actually fits this content — not a generic "thoughts?" bolted onto anything.
-- Quote post: ${WEIGHTS.quote}, Share via DM: ${WEIGHTS.shareViaDm}
-- Follow the author: ${WEIGHTS.followAuthor}
-- Share (generic): ${WEIGHTS.share}
-- Repost: ${WEIGHTS.retweet}
-- Like: ${WEIGHTS.favorite} (the lowest positive weight of all — don't optimize for likes at the expense of the above)
-
-NEGATIVE (avoid triggering these, ranked by severity):
-- Report: ${WEIGHTS.report} (by far the single largest weight in the whole model, positive or negative)
-- Mute: ${WEIGHTS.muteAuthor}
-- Not interested: ${WEIGHTS.notInterested}
-- Block: ${WEIGHTS.blockAuthor}
-These get triggered by: ALL-CAPS shouting, punctuation bursts (!!!, ???), more than 2 hashtags, generic broadcast/boilerplate phrasing (things like ${BOILERPLATE_PHRASES.slice(0, 4).map((p) => `"${p}"`).join(", ")}), and shortened or redirect links.
-
-Other craft signals that matter here: filler/hedge words ("very", "just", "actually", "I think") and passive voice read as less confident and hold attention worse. Opening with the actual point beats opening with a wind-up ("I think", "so,", "well,"). Keep the total length under ${charLimit.toLocaleString()} characters.
-
-Never invent facts, numbers, names, or tickers, and never change the meaning of the original post. Preserve every specific claim exactly.
-
-Original post:
+Post:
 """
 ${text}
 """
 
-Write ${numVariants} alternative versions of this SAME post that are tighter, more direct, and end with a hook genuinely relevant to this specific content. Keep the author's voice and every factual claim identical. Only change phrasing and structure.
-
-Output ONLY the alternatives, each on its own line, prefixed with "VARIANT: " and nothing else. No preamble, no explanation, no extra commentary.`;
+Write ${numVariants} tighter rewrites of this SAME post, same voice and facts, each ending with a hook relevant to this content. Output only lines starting "VARIANT: ", nothing else.`;
 }
 
 function parseVariants(raw: string, max: number): string[] {
