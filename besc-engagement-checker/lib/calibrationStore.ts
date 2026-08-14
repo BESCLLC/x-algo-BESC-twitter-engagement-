@@ -1,6 +1,6 @@
 import { query } from "./db";
 import { analyzePost, extractFeatures } from "./scoring";
-import { fetchUserTimelinePage } from "./twitter-import";
+import { fetchTweetMetrics, fetchUserTimelinePage } from "./twitter-import";
 import {
   type CalibrationModel,
   type CalibrationSample,
@@ -13,13 +13,51 @@ import type { MediaType } from "./types";
 // page is one Vee3 call, and timelines return roughly 20-40 posts per page.
 const MAX_BACKFILL_PAGES = 12;
 const BACKFILL_TARGET_POSTS = 400;
+const EMPTY_POSTS: Awaited<ReturnType<typeof fetchUserTimelinePage>>["posts"] = [];
 
 export interface BackfillResult {
   fetched: number;
   inserted: number;
   /** Already-known posts whose numbers (and stale predicted scores) were updated. */
   refreshed: number;
+  /** Posts whose timeline metrics looked wrong and were re-read from tweet-info. */
+  enriched: number;
   usable: number;
+}
+
+/**
+ * Timeline entries and tweet-info responses don't carry engagement in the same
+ * shape, and a field we fail to find reads as a genuine zero. A real backfill
+ * recorded 0 likes across an entire 200-post history while replies and reposts
+ * came through — an impossible combination for a post with real engagement,
+ * and one that silently poisons the model with an always-zero metric.
+ *
+ * Rather than keep guessing key names from the outside, treat that pattern as
+ * a failed read and re-fetch from tweet-info, which is known to return likes
+ * correctly (it's what the imported-post stats display).
+ */
+function metricsLookIncomplete(m: { likes: number; replies: number; retweets: number; bookmarks: number }): boolean {
+  return m.likes === 0 && m.replies + m.retweets + m.bookmarks > 0;
+}
+
+// Bounded concurrency: enrichment can mean a few hundred calls, which is far
+// too slow sequentially for a request, and unbounded would hammer the API.
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (cursor < items.length) {
+        const index = cursor++;
+        results[index] = await fn(items[index]);
+      }
+    })
+  );
+  return results;
 }
 
 /**
@@ -37,20 +75,54 @@ export async function backfillFromTimeline(
   handle: string,
   // Injectable for the same reason syncTrackedPosts takes its fetchers: it
   // makes the insert/pagination logic testable without live network calls.
-  fetchPage: typeof fetchUserTimelinePage = fetchUserTimelinePage
+  fetchPage: typeof fetchUserTimelinePage = fetchUserTimelinePage,
+  fetchMetrics: typeof fetchTweetMetrics = fetchTweetMetrics
 ): Promise<BackfillResult> {
   const normalized = handle.toLowerCase();
   let cursor: string | undefined;
   let fetched = 0;
   let inserted = 0;
   let refreshed = 0;
+  let enriched = 0;
   const seenCursors = new Set<string>();
 
+  const collected: typeof EMPTY_POSTS = [];
   for (let page = 0; page < MAX_BACKFILL_PAGES && fetched < BACKFILL_TARGET_POSTS; page++) {
     const { posts, nextCursor } = await fetchPage(normalized, cursor);
     if (posts.length === 0) break;
     fetched += posts.length;
+    collected.push(...posts);
 
+    // A missing or repeating cursor means there's no more history to walk;
+    // without this guard a self-referential cursor would loop until the page cap.
+    if (!nextCursor || seenCursors.has(nextCursor)) break;
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  }
+
+  // Repair any post whose timeline metrics look like a failed field read,
+  // before any of it reaches the model.
+  const needsEnrichment = collected.filter(
+    (p) => !p.isReply && p.metrics && metricsLookIncomplete(p.metrics)
+  );
+  if (needsEnrichment.length > 0) {
+    await mapWithConcurrency(needsEnrichment, 6, async (post) => {
+      try {
+        const fresh = await fetchMetrics(post.tweetId);
+        // Only accept the re-read if it actually resolved the problem;
+        // otherwise keep what we had rather than overwrite with another zero.
+        if (!metricsLookIncomplete(fresh)) {
+          post.metrics = fresh;
+          enriched++;
+        }
+      } catch {
+        // One unreadable post must not fail the whole backfill.
+      }
+    });
+  }
+
+  {
+    const posts = collected;
     for (const post of posts) {
       if (post.isReply) continue;
       const metrics = post.metrics;
@@ -129,16 +201,10 @@ export async function backfillFromTimeline(
       if (rows[0]?.inserted) inserted++;
       else if (rows.length > 0) refreshed++;
     }
-
-    // A missing or repeating cursor means there's no more history to walk;
-    // without this guard a self-referential cursor would loop until the page cap.
-    if (!nextCursor || seenCursors.has(nextCursor)) break;
-    seenCursors.add(nextCursor);
-    cursor = nextCursor;
   }
 
   const usable = await countUsableSamples(normalized);
-  return { fetched, inserted, refreshed, usable };
+  return { fetched, inserted, refreshed, enriched, usable };
 }
 
 async function countUsableSamples(handle: string): Promise<number> {
