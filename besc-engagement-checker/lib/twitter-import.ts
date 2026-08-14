@@ -157,14 +157,13 @@ export async function lookupAuthor(handleInput: string): Promise<AuthorLookupRes
 
   const raw = await callVee3Tool<Raw>("x-twitter_user_info", { user_name: handle });
   // The account object may come back nested (user/data/result) or flat,
-  // depending on the exact shape Vee3 returns for this tool.
+  // depending on the exact shape Vee3 returns for this tool. Confirmed flat
+  // against a real response, with the handle under "profile" (not
+  // user_name/screen_name/username like the tweet-info author object uses).
   const user = pick<Raw>(raw, ["user", "data", "result"], raw);
 
-  const authorHandle = pick<string>(user, ["user_name", "screen_name", "username"], "");
+  const authorHandle = pick<string>(user, ["profile", "user_name", "screen_name", "username"], "");
   if (!authorHandle) {
-    // TEMP: log the raw payload so the real field names can be confirmed
-    // from Railway's runtime logs instead of guessing again.
-    console.log(`[lookup-author debug] handle=${handle} raw=`, JSON.stringify(raw));
     throw new Error("Vee3 didn't return account info for that handle.");
   }
 
