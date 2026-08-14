@@ -1,4 +1,10 @@
-import { analyzePost, BOILERPLATE_PHRASES, REPLY_CTA_PHRASES } from "./scoring";
+import {
+  analyzePost,
+  BOILERPLATE_PHRASES,
+  REPLY_CTA_PHRASES,
+  getHashtagWordSet,
+  isShoutingCapsWord,
+} from "./scoring";
 import { stripFillerWords } from "./nlp";
 import type { AnalyzeRequest, OptimizeResult, OptimizeStep } from "./types";
 
@@ -15,15 +21,17 @@ function titleCaseWord(word: string): string {
   return letters[0].toUpperCase() + letters.slice(1).toLowerCase() + rest;
 }
 
-// Mirrors the all-caps detection in scoring.ts's extractFeatures, so anything
-// flagged as "shouting" there is exactly what gets defused here.
-function fixAllCapsShouting(text: string): string {
+// Uses the exact same all-caps + hashtag-protection logic scoring.ts scores
+// against, so this never "fixes" a word (like a brand/ticker also hashtagged
+// elsewhere in the post) that isn't actually being penalized as shouting.
+// protectedWords must come from the ORIGINAL draft, not be re-derived from
+// whatever text survives earlier passes — otherwise a later rule (e.g.
+// trim-to-limit truncating off the trailing hashtags) can un-protect a word
+// that was legitimately protected a moment ago.
+function fixAllCapsShouting(text: string, protectedWords: Set<string>): string {
   return text
     .split(/(\s+)/)
-    .map((token) => {
-      const isAllCapsWord = token.length >= 3 && token === token.toUpperCase() && /[A-Z]/.test(token);
-      return isAllCapsWord ? titleCaseWord(token) : token;
-    })
+    .map((token) => (isShoutingCapsWord(token, protectedWords) ? titleCaseWord(token) : token))
     .join("");
 }
 
@@ -75,7 +83,8 @@ interface Rule {
   forced?: boolean;
 }
 
-const RULES: Rule[] = [
+function buildRules(protectedWords: Set<string>): Rule[] {
+  return [
   {
     id: "collapse-punctuation",
     label: "Toned down !!! / ??? bursts",
@@ -87,7 +96,7 @@ const RULES: Rule[] = [
     label: "Fixed ALL-CAPS shouting",
     reason:
       "A high all-caps ratio pushes up Not-interested/Mute/Report propensity — the three most negative weights in the model.",
-    transform: fixAllCapsShouting,
+    transform: (t: string) => fixAllCapsShouting(t, protectedWords),
   },
   {
     id: "cap-hashtags",
@@ -122,7 +131,8 @@ const RULES: Rule[] = [
     transform: trimToCharLimit,
     forced: true,
   },
-];
+  ];
+}
 
 /**
  * Deterministic, meaning-preserving fixer: each rule is only kept if it
@@ -139,6 +149,7 @@ const MAX_PASSES = 3;
 // re-running the whole list until nothing changes converges safely.
 export function optimizePost(req: AnalyzeRequest): OptimizeResult {
   const before = analyzePost(req);
+  const RULES = buildRules(getHashtagWordSet(req.text));
   let current: AnalyzeRequest = { ...req };
   let currentScore = before;
   let anyForcedApplied = false;

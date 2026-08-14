@@ -116,6 +116,26 @@ const SHARE_CTA_PHRASES = [
   "save this",
 ];
 
+function normalizeHashtagWord(w: string): string {
+  return w.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+}
+
+// A post that hashtags its own brand/ticker (#BESC) and also writes it in
+// caps in the body ("BESC Exchange...") isn't shouting — it's just the name.
+// Both the ALL-CAPS risk score and the auto-fixer treat any word echoed as a
+// hashtag elsewhere in the same post as protected, rather than penalizing or
+// rewriting it.
+export function getHashtagWordSet(text: string): Set<string> {
+  const matches = text.match(HASHTAG_RE) || [];
+  return new Set(matches.map(normalizeHashtagWord));
+}
+
+export function isShoutingCapsWord(token: string, protectedWords: Set<string>): boolean {
+  const isAllCaps = token.length >= 3 && token === token.toUpperCase() && /[A-Z]/.test(token);
+  if (!isAllCaps) return false;
+  return !protectedWords.has(normalizeHashtagWord(token));
+}
+
 export function extractFeatures(text: string, link: string): FeatureReport {
   const trimmed = text.trim();
   const words = trimmed.length ? trimmed.split(/\s+/) : [];
@@ -127,9 +147,8 @@ export function extractFeatures(text: string, link: string): FeatureReport {
   const links = textLinks + (link.trim() ? 1 : 0);
   const emojis = (trimmed.match(EMOJI_RE) || []).length;
 
-  const capsWords = words.filter(
-    (w) => w.length >= 3 && w === w.toUpperCase() && /[A-Z]/.test(w)
-  );
+  const hashtagWords = getHashtagWordSet(trimmed);
+  const capsWords = words.filter((w) => isShoutingCapsWord(w, hashtagWords));
   const allCapsWordRatio = words.length ? capsWords.length / words.length : 0;
 
   const exclamationBursts = (trimmed.match(/!{2,}|\?{2,}|!\?|\?!/g) || [])
