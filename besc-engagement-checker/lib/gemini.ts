@@ -1,4 +1,4 @@
-import { buildGeneratePrompt, buildRewritePrompt, parseVariants } from "./aiPrompt";
+import { buildGeneratePrompt, buildRewritePrompt, estimateMaxOutputTokens, parseVariants } from "./aiPrompt";
 
 export class GeminiError extends Error {}
 
@@ -6,8 +6,6 @@ export class GeminiError extends Error {}
 // story here, so a much shorter timeout than the Ollama path is safe and
 // keeps a real outage from stalling the response for anywhere near as long.
 const REQUEST_TIMEOUT_MS = 20000;
-
-const MAX_OUTPUT_TOKENS = 250;
 
 // A dated model ID (e.g. "gemini-2.5-flash") can get retired out from under
 // new API keys without warning — that's exactly what happened here. The
@@ -28,7 +26,11 @@ interface GeminiResponse {
   promptFeedback?: { blockReason?: string };
 }
 
-async function callGeminiForVariants(prompt: string, numVariants: number): Promise<string[]> {
+async function callGeminiForVariants(
+  prompt: string,
+  numVariants: number,
+  maxOutputTokens: number
+): Promise<string[]> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new GeminiError("GEMINI_API_KEY not configured");
@@ -47,7 +49,7 @@ async function callGeminiForVariants(prompt: string, numVariants: number): Promi
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.8, maxOutputTokens: MAX_OUTPUT_TOKENS },
+          generationConfig: { temperature: 0.8, maxOutputTokens },
         }),
         signal: controller.signal,
       }
@@ -80,13 +82,26 @@ export async function generateRewriteCandidatesGemini(
   numVariants = 2,
   charLimit = 280
 ): Promise<string[]> {
-  return callGeminiForVariants(buildRewritePrompt(text, numVariants, charLimit), numVariants);
+  return callGeminiForVariants(
+    buildRewritePrompt(text, numVariants, charLimit),
+    numVariants,
+    estimateMaxOutputTokens(charLimit, numVariants)
+  );
 }
 
+// More variants than the rewrite path on purpose: generating from scratch
+// has no single "obviously correct" direction the way tightening an
+// existing draft does, so a wider best-of-N sample genuinely raises the
+// odds the top-scoring one is actually good, not just the least-bad option
+// out of a couple of tries.
 export async function generatePostsFromContextGemini(
   context: string,
-  numVariants = 3,
+  numVariants = 5,
   charLimit = 280
 ): Promise<string[]> {
-  return callGeminiForVariants(buildGeneratePrompt(context, numVariants, charLimit), numVariants);
+  return callGeminiForVariants(
+    buildGeneratePrompt(context, numVariants, charLimit),
+    numVariants,
+    estimateMaxOutputTokens(charLimit, numVariants)
+  );
 }

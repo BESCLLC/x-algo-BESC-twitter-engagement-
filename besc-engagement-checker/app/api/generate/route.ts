@@ -27,9 +27,12 @@ export async function POST(req: NextRequest) {
     const { context, ...contextFields } = parsed;
     const charLimit = getCharLimit(parsed.isVerified);
 
+    // Provider-specific defaults on purpose: Gemini (hosted, cheap) samples
+    // more variants for a wider best-of-N pool; Ollama (self-hosted CPU)
+    // stays conservative given its timeout history — see lib/ollama.ts.
     const rawCandidates = geminiConfigured()
-      ? await generatePostsFromContextGemini(context, 3, charLimit)
-      : await generatePostsFromContext(context, 3, charLimit);
+      ? await generatePostsFromContextGemini(context, undefined, charLimit)
+      : await generatePostsFromContext(context, undefined, charLimit);
 
     // Every AI-written candidate still gets run through the deterministic
     // optimizer before it's shown — same "suggest, never decide" contract as

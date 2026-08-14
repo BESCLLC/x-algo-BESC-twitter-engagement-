@@ -1,4 +1,4 @@
-import { buildGeneratePrompt, buildRewritePrompt, parseVariants } from "./aiPrompt";
+import { buildGeneratePrompt, buildRewritePrompt, estimateMaxOutputTokens, parseVariants } from "./aiPrompt";
 
 export class OllamaError extends Error {}
 
@@ -9,11 +9,13 @@ export class OllamaError extends Error {}
 // CPU; tighten this back up if you drop to a smaller model.
 const REQUEST_TIMEOUT_MS = 100000;
 
-// Unbounded generation is the other half of the timeout risk: nothing was
-// capping how many tokens the model could produce before stopping on its
-// own, so a verbose response could run long regardless of the timeout. Two
-// short rewrite variants need well under this many tokens.
-const MAX_OUTPUT_TOKENS = 250;
+// Generation time on CPU scales with token count, and this service has a
+// real documented history of hitting REQUEST_TIMEOUT_MS (see git log —
+// "loads forever," the cold-start saga). estimateMaxOutputTokens()'s shared
+// 2000-token ceiling is sized for a hosted API, not CPU inference — capped
+// much lower here so a verified account's large charLimit or a wide
+// best-of-N sample can't reintroduce that timeout risk on this path.
+const OLLAMA_MAX_OUTPUT_TOKENS = 500;
 
 // Ollama's own CPU thread auto-detection is a known-unreliable in containers
 // (it can under-count what's actually schedulable), which is a plausible
@@ -75,7 +77,11 @@ async function checkOllamaHealth(url: string, model: string): Promise<void> {
   }
 }
 
-async function callOllamaForVariants(prompt: string, numVariants: number): Promise<string[]> {
+async function callOllamaForVariants(
+  prompt: string,
+  numVariants: number,
+  maxOutputTokens: number
+): Promise<string[]> {
   const url = process.env.OLLAMA_URL;
   const model = process.env.OLLAMA_MODEL;
   if (!url || !model) {
@@ -96,7 +102,7 @@ async function callOllamaForVariants(prompt: string, numVariants: number): Promi
         model,
         prompt,
         stream: false,
-        options: { temperature: 0.8, num_predict: MAX_OUTPUT_TOKENS, num_thread: NUM_THREAD },
+        options: { temperature: 0.8, num_predict: maxOutputTokens, num_thread: NUM_THREAD },
       }),
       signal: controller.signal,
     });
@@ -123,13 +129,24 @@ export async function generateRewriteCandidates(
   numVariants = 2,
   charLimit = 280
 ): Promise<string[]> {
-  return callOllamaForVariants(buildRewritePrompt(text, numVariants, charLimit), numVariants);
+  return callOllamaForVariants(
+    buildRewritePrompt(text, numVariants, charLimit),
+    numVariants,
+    Math.min(OLLAMA_MAX_OUTPUT_TOKENS, estimateMaxOutputTokens(charLimit, numVariants))
+  );
 }
 
+// Kept lower than Gemini's default (5) — more variants means more output
+// tokens means more CPU time on this path, and this service doesn't get to
+// spend that budget as freely given its timeout history.
 export async function generatePostsFromContext(
   context: string,
   numVariants = 3,
   charLimit = 280
 ): Promise<string[]> {
-  return callOllamaForVariants(buildGeneratePrompt(context, numVariants, charLimit), numVariants);
+  return callOllamaForVariants(
+    buildGeneratePrompt(context, numVariants, charLimit),
+    numVariants,
+    Math.min(OLLAMA_MAX_OUTPUT_TOKENS, estimateMaxOutputTokens(charLimit, numVariants))
+  );
 }

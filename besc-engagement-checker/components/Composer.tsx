@@ -20,6 +20,7 @@ import {
   AtSign,
   Undo2,
   Reply,
+  Copy,
 } from "lucide-react";
 import type {
   AnalyzeRequest,
@@ -337,17 +338,46 @@ export default function Composer({
   const chars = text.length;
   const overLimit = chars > charLimit;
 
+  const [copied, setCopied] = useState(false);
+
+  async function copyDraftToClipboard() {
+    if (!text.trim()) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard access can fail (insecure context, denied permission) —
+      // not worth surfacing an error for a convenience action.
+    }
+  }
+
   return (
     <div className="glass-panel p-5 sm:p-6">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="font-display text-lg font-semibold">Draft your post</h2>
-        <span
-          className={`font-mono text-xs tabular-nums ${
-            overLimit ? "text-danger" : "text-white/35"
-          }`}
-        >
-          {chars.toLocaleString()}/{charLimit.toLocaleString()}
-        </span>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={copyDraftToClipboard}
+            disabled={!text.trim()}
+            className="flex items-center gap-1 text-xs font-medium text-white/50 transition-colors hover:text-white/80 disabled:cursor-not-allowed disabled:opacity-30"
+          >
+            {copied ? (
+              <Check className="h-3.5 w-3.5 text-besc-300" />
+            ) : (
+              <Copy className="h-3.5 w-3.5" />
+            )}
+            {copied ? "Copied" : "Copy"}
+          </button>
+          <span
+            className={`font-mono text-xs tabular-nums ${
+              overLimit ? "text-danger" : "text-white/35"
+            }`}
+          >
+            {chars.toLocaleString()}/{charLimit.toLocaleString()}
+          </span>
+        </div>
       </div>
 
       <div className="mb-4">
