@@ -3,8 +3,9 @@ export class OllamaError extends Error {}
 // Local CPU inference on a self-hosted model can be genuinely slow —
 // generous timeout, but still a hard one. Learned this lesson the hard way
 // with the Vee3 "loads forever" bug: an external call with no deadline
-// leaves the UI spinning with no way out.
-const REQUEST_TIMEOUT_MS = 45000;
+// leaves the UI spinning with no way out. Sized for the default 14B model on
+// CPU; tighten this back up if you drop to a smaller model.
+const REQUEST_TIMEOUT_MS = 90000;
 
 export function ollamaConfigured(): boolean {
   return Boolean(process.env.OLLAMA_URL && process.env.OLLAMA_MODEL);

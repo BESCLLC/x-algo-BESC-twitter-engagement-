@@ -5,9 +5,10 @@
 FROM ollama/ollama:latest
 
 # Override with a Railway build arg if you want a different model.
-# llama3.2:3b is a reasonable default for CPU inference: good instruction
-# following for a rewrite task, without needing a GPU or huge RAM headroom.
-ARG MODEL=llama3.2:3b
+# qwen2.5:14b-instruct — strong instruction-following/writing quality for
+# the rewrite task. Needs real RAM headroom (see README.md sizing note);
+# drop to llama3.2:3b if the service is memory-constrained.
+ARG MODEL=qwen2.5:14b-instruct
 
 # Bring the server up just long enough to pull the model into the image layer,
 # then let the container's real ENTRYPOINT run it for real at runtime.

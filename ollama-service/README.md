@@ -16,19 +16,22 @@ scorer, so this only ever *suggests*, never decides.
 3. **Settings → Source → Root Directory**: set to `ollama-service`. Railway
    will auto-detect the `Dockerfile` here and build it directly — no
    `railway.json` needed.
-4. **Sizing**: give this service at least **4GB RAM** (Settings → Resources,
-   or your plan's equivalent). `llama3.2:3b` on CPU needs headroom beyond just
-   the ~2GB model file for inference. If replies feel slow or the service
-   OOMs, bump this further or drop to a smaller model (edit the `ARG MODEL`
-   line in `Dockerfile`, e.g. `llama3.2:1b`).
-5. **Deploy.** The first build pulls the model into the image layer, so it'll
-   take a few minutes (progress shows in the build log — watch for `ollama
-   pull` output). Every deploy after that reuses the baked-in model, so
-   restarts are instant.
+4. **Sizing**: the default model is `qwen2.5:14b-instruct` (~9GB on disk at
+   Ollama's default quantization) — give this service at least **16GB RAM**
+   (Settings → Resources, or your plan's equivalent) to leave headroom for
+   inference on top of the weights themselves. CPU inference at this size
+   will be noticeably slower per request (many seconds, not instant) — that's
+   expected. If it's too slow or OOMs, drop to `llama3.1:8b` (~8GB RAM) or
+   `llama3.2:3b` (~4GB RAM) by editing the `ARG MODEL` line in `Dockerfile`.
+5. **Deploy.** The first build pulls the model into the image layer — at 14B
+   size this can take a while (progress shows in the build log — watch for
+   `ollama pull` output; make sure your Railway build timeout is generous
+   enough). Every deploy after that reuses the baked-in model, so restarts
+   are instant.
 6. Once it's live, go to the **besc-engagement-checker** service's Variables
    and add:
    - `OLLAMA_URL=http://ollama.railway.internal:11434`
-   - `OLLAMA_MODEL=llama3.2:3b` (match whatever `ARG MODEL` you built with)
+   - `OLLAMA_MODEL=qwen2.5:14b-instruct` (match whatever `ARG MODEL` you built with)
 
 If the app can't reach it, double check **Private Networking** is enabled on
 both services (Railway project settings) — it's on by default for services
