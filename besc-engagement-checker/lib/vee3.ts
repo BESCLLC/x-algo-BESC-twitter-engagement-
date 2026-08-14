@@ -11,25 +11,6 @@ interface ToolContentBlock {
 
 export class Vee3Error extends Error {}
 
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Vee3Error(`${label} timed out after ${(ms / 1000).toFixed(0)}s`)),
-      ms
-    );
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (err) => {
-        clearTimeout(timer);
-        reject(err);
-      }
-    );
-  });
-}
-
 export async function callVee3Tool<T = unknown>(
   toolName: string,
   args: Record<string, unknown>
@@ -44,18 +25,21 @@ export async function callVee3Tool<T = unknown>(
   });
   const client = new Client({ name: "besc-engagement-checker", version: "1.0.0" });
 
+  // A real AbortController, passed to the SDK's own signal option, so a
+  // timeout properly cancels the in-flight request instead of just walking
+  // away from it — an external Promise.race that abandons a still-running
+  // connect()/callTool() while we call client.close() underneath it is what
+  // caused the "Load failed" connection-reset errors after the first attempt
+  // at this fix.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
   try {
-    // client.connect() does the initial handshake and isn't covered by
-    // callTool's own request timeout, so it needs its own hard deadline —
-    // otherwise a hung/unresponsive Vee3 endpoint spins the UI forever.
-    await withTimeout(client.connect(transport), REQUEST_TIMEOUT_MS, "Vee3 connection");
-    const result = await withTimeout(
-      client.callTool({ name: toolName, arguments: args }, undefined, {
-        timeout: REQUEST_TIMEOUT_MS,
-      }),
-      REQUEST_TIMEOUT_MS + 2000,
-      `Vee3 tool "${toolName}"`
-    );
+    await client.connect(transport, { signal: controller.signal, timeout: REQUEST_TIMEOUT_MS });
+    const result = await client.callTool({ name: toolName, arguments: args }, undefined, {
+      signal: controller.signal,
+      timeout: REQUEST_TIMEOUT_MS,
+    });
 
     const blocks = (result.content ?? []) as ToolContentBlock[];
     const textBlock = blocks.find((b) => b.type === "text" && typeof b.text === "string");
@@ -73,7 +57,13 @@ export async function callVee3Tool<T = unknown>(
     } catch {
       return textBlock.text as unknown as T;
     }
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw new Vee3Error(`Vee3 request timed out after ${(REQUEST_TIMEOUT_MS / 1000).toFixed(0)}s`);
+    }
+    throw err;
   } finally {
+    clearTimeout(timer);
     await client.close().catch(() => {});
   }
 }
