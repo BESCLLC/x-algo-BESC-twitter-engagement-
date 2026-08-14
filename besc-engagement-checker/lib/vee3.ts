@@ -2,6 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 const VEE3_MCP_URL = "https://mcp.vee3.io/mcp";
+const REQUEST_TIMEOUT_MS = 20000;
 
 interface ToolContentBlock {
   type: string;
@@ -9,6 +10,25 @@ interface ToolContentBlock {
 }
 
 export class Vee3Error extends Error {}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Vee3Error(`${label} timed out after ${(ms / 1000).toFixed(0)}s`)),
+      ms
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
 
 export async function callVee3Tool<T = unknown>(
   toolName: string,
@@ -25,8 +45,17 @@ export async function callVee3Tool<T = unknown>(
   const client = new Client({ name: "besc-engagement-checker", version: "1.0.0" });
 
   try {
-    await client.connect(transport);
-    const result = await client.callTool({ name: toolName, arguments: args });
+    // client.connect() does the initial handshake and isn't covered by
+    // callTool's own request timeout, so it needs its own hard deadline —
+    // otherwise a hung/unresponsive Vee3 endpoint spins the UI forever.
+    await withTimeout(client.connect(transport), REQUEST_TIMEOUT_MS, "Vee3 connection");
+    const result = await withTimeout(
+      client.callTool({ name: toolName, arguments: args }, undefined, {
+        timeout: REQUEST_TIMEOUT_MS,
+      }),
+      REQUEST_TIMEOUT_MS + 2000,
+      `Vee3 tool "${toolName}"`
+    );
 
     const blocks = (result.content ?? []) as ToolContentBlock[];
     const textBlock = blocks.find((b) => b.type === "text" && typeof b.text === "string");

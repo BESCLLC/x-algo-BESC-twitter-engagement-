@@ -18,11 +18,16 @@ export default function SignalBreakdown({ actions }: { actions: ActionRow[] }) {
   const top = actions.slice(0, TOP_N_VISIBLE);
   const rest = actions.slice(TOP_N_VISIBLE);
 
+  // Detail text used to render inline, always-visible, below each bar. It was
+  // a hover-triggered overlay before, but :hover has no reliable equivalent
+  // on touch — mobile browsers can get "stuck" showing it, stacking dozens of
+  // overlapping tooltip boxes on top of the page. Static text has no such
+  // failure mode.
   const Row = (a: ActionRow, i: number) => {
     const width = Math.min(100, (Math.abs(a.contribution) / maxAbs) * 100);
     const positive = a.contribution >= 0;
     return (
-      <div key={a.id} className="group relative">
+      <div key={a.id}>
         <div className="mb-1 flex items-baseline justify-between gap-3 text-sm">
           <div className="flex min-w-0 items-baseline gap-2">
             <span className="truncate font-medium text-white/90">{a.label}</span>
@@ -51,11 +56,10 @@ export default function SignalBreakdown({ actions }: { actions: ActionRow[] }) {
             }`}
           />
         </div>
-        <div className="pointer-events-none absolute left-0 top-full z-10 mt-1 w-max max-w-[min(20rem,80vw)] rounded-lg border border-white/10 bg-panel px-2.5 py-1.5 text-[11px] text-white/60 opacity-0 shadow-xl transition-opacity duration-150 group-hover:opacity-100">
-          weight {a.weight.toFixed(2)} × P {(a.probability * 100).toFixed(0)}%
-          <br />
-          <span className="text-white/40">{a.weightSource}</span>
-        </div>
+        <p className="mt-1 truncate text-[11px] text-white/35">
+          weight {a.weight.toFixed(2)} × P {(a.probability * 100).toFixed(0)}% —{" "}
+          <span className="text-white/25">{a.weightSource}</span>
+        </p>
       </div>
     );
   };

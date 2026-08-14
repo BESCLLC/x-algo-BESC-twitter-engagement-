@@ -112,11 +112,14 @@ export default function Composer({
     setImporting(true);
     setImportError(null);
     onImport?.(null);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
     try {
       const res = await fetch("/api/fetch-tweet", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: importUrl.trim() }),
+        signal: controller.signal,
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Import failed");
@@ -129,8 +132,10 @@ export default function Composer({
       setPostedHoursAgo(imported.postedHoursAgo);
       onImport?.(imported);
     } catch (e) {
-      setImportError((e as Error).message);
+      const err = e as Error;
+      setImportError(err.name === "AbortError" ? "Import timed out — try again." : err.message);
     } finally {
+      clearTimeout(timeoutId);
       setImporting(false);
     }
   }
