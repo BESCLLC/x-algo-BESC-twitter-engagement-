@@ -7,13 +7,14 @@
 FROM ollama/ollama:latest
 
 # Override with a Railway build arg if you want a different model.
-# llama3.2:3b: dropped down from 7b after THAT also hit the same 100s
-# timeout wall, three times in a row, with the health check confirming
-# connectivity/model-loading were never the problem. This is a diagnostic
-# step as much as a fix — if 3b still times out, the bottleneck is this
-# service's actual CPU allocation, not model size, and no amount of
-# further downsizing will fix it.
-ARG MODEL=llama3.2:3b
+# The earlier 100s timeouts (14b, then 7b, then 3b, all hitting the same
+# wall) turned out to be cold-start: the first generate call after a
+# container boots pays for paging the model weights into RAM, competing
+# with REQUEST_TIMEOUT_MS in lib/ollama.ts. Once warm, llama3.2:3b answered
+# reliably every time. qwen2.5:7b-instruct is the next step up now that
+# warm-state performance is confirmed — a real quality jump over 3b, still
+# small enough to fail fast if it doesn't hold up.
+ARG MODEL=qwen2.5:7b-instruct
 ENV MODEL_NAME=${MODEL}
 ENV OLLAMA_HOST=0.0.0.0:11434
 
