@@ -185,7 +185,7 @@ export function extractFeatures(text: string, link: string): FeatureReport {
       .toLowerCase();
     if (SHORTENER_HOSTS.includes(host)) {
       urlRisk = true;
-      urlReason = `"${host}" is a link-shortener/redirect domain — redirect chains are exactly what scarecrow's URL-verdict rules (e.g. bot 3226, bot 6754) resolve and re-check before trusting a link.`;
+      urlReason = `"${host}" is a link-shortener/redirect domain. Redirect chains are exactly what scarecrow's URL-verdict rules (e.g. bot 3226, bot 6754) resolve and re-check before trusting a link.`;
     } else if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
       urlRisk = true;
       urlReason =
@@ -533,7 +533,7 @@ function buildRisks(f: FeatureReport, req: AnalyzeRequest): RiskFlag[] {
       severity: "critical",
       title: "Link may resolve to a low-quality / BAD URL verdict",
       detail: f.urlReason
-        ? `${f.urlReason} A "LOW_QUALITY" verdict gets downranked — but if re-crawling turns up an actual "UNSAFE" verdict, the consequence is categorically worse: visibility-filtering applies MALICIOUS_URL_DROP/DO_NOT_AMPLIFY_DROP, which is a hard non-distribution drop for every non-author viewer, not a downrank.`
+        ? `${f.urlReason} A "LOW_QUALITY" verdict gets downranked. If re-crawling turns up an actual "UNSAFE" verdict, though, the consequence is categorically worse: visibility-filtering applies MALICIOUS_URL_DROP/DO_NOT_AMPLIFY_DROP, which is a hard non-distribution drop for every non-author viewer, not a downrank.`
         : "No risky link pattern detected in this draft.",
       source:
         "botmaker-rules/scarecrow/bot/Tweet_Spam_High_Recall_RTF_All_Bad_URL_Sources.bot, LQ_Tweets_With_LQ_URL_Verdict_At_Mention_To_NonFollower_v2.bot, rtf_tweets_on_unsafe_verdict.bot (id 20790); visibility-filtering/rules/tweet_label_drops.rs:113-124",
@@ -554,9 +554,9 @@ function buildRisks(f: FeatureReport, req: AnalyzeRequest): RiskFlag[] {
       severity: "warning",
       title: "Reads like templated / copy-paste boilerplate",
       detail:
-        'Phrases like "follow for follow", "link in bio", or "RT if you agree" match the kind of generic, repeated-across-many-posts text that duplicate-text spam detection is built to catch — the same COPYPASTA_SPAM detection runs on reply text too, unigram- and CJK-character-matched, not just original posts.',
+        'Phrases like "follow for follow", "link in bio", or "RT if you agree" match the kind of generic, repeated-across-many-posts text that duplicate-text spam detection is built to catch. The same COPYPASTA_SPAM detection runs on reply text too, unigram- and CJK-character-matched, not just original posts.',
       source:
-        "botmaker-rules/scarecrow/bot/BBQDuplicateTextProd.bot (id 21711), BBQDuplicateTextRepliesProd.bot (id 21599) — heuristic proxy, not a literal duplicate-corpus match",
+        "botmaker-rules/scarecrow/bot/BBQDuplicateTextProd.bot (id 21711), BBQDuplicateTextRepliesProd.bot (id 21599); heuristic proxy, not a literal duplicate-corpus match",
       triggered: f.hasBoilerplateCTA,
     },
     {
@@ -564,8 +564,8 @@ function buildRisks(f: FeatureReport, req: AnalyzeRequest): RiskFlag[] {
       severity: "warning",
       title: "Heavy use of ALL-CAPS reads as spammy / shouty",
       detail:
-        "A high ratio of all-caps words correlates with the kind of low-quality, aggressive formatting that pushes up 'not interested', mute, and report propensity — and those three actions carry the three most negative weights in the entire model (-43.2, -58.8, -234).",
-      source: "home-mixer/params/param.rs — NotInterestedWeight, MuteAuthorWeight, ReportWeight",
+        "A high ratio of all-caps words correlates with the kind of low-quality, aggressive formatting that pushes up 'not interested', mute, and report propensity. Those three actions carry the three most negative weights in the entire model (-43.2, -58.8, -234).",
+      source: "home-mixer/params/param.rs: NotInterestedWeight, MuteAuthorWeight, ReportWeight",
       triggered: f.allCapsWordRatio > 0.25,
     },
     {
@@ -584,7 +584,7 @@ function buildRisks(f: FeatureReport, req: AnalyzeRequest): RiskFlag[] {
       detail:
         "Marked as sensitive media: viewers who haven't opted into sensitive content will see this post behind an interstitial instead of the media directly, which suppresses impulse engagement.",
       source:
-        "visibility-filtering/rules/nsfw_interstitial.rs — NSFW_HIGH_PRECISION_INTERSTITIAL / NsfwAuthorInterstitialRule",
+        "visibility-filtering/rules/nsfw_interstitial.rs: NSFW_HIGH_PRECISION_INTERSTITIAL / NsfwAuthorInterstitialRule",
       triggered: req.nsfw,
     },
     {
@@ -602,11 +602,11 @@ function buildRisks(f: FeatureReport, req: AnalyzeRequest): RiskFlag[] {
       title: "Repeat posting in the same window compresses reach",
       detail: `You told us this is post #${
         req.recentPostsCount + 1
-      } from you in this window. Author-diversity decay multiplies each additional post from the same author by (1 - 0.25) × 0.5^k + 0.25 — so a 2nd post already scores at ${(
+      } from you in this window. Author-diversity decay multiplies each additional post from the same author by (1 - 0.25) × 0.5^k + 0.25, so a 2nd post already scores at ${(
         authorDiversityMultiplier(1) * 100
       ).toFixed(0)}% and it floors at 25% by the 4th+.`,
       source:
-        "home-mixer/scorers/ranking_scorer.rs — diversity_multiplier(decay=0.5, floor=0.25)",
+        "home-mixer/scorers/ranking_scorer.rs: diversity_multiplier(decay=0.5, floor=0.25)",
       triggered: req.recentPostsCount >= 1,
     },
     {
@@ -614,8 +614,8 @@ function buildRisks(f: FeatureReport, req: AnalyzeRequest): RiskFlag[] {
       severity: "info",
       title: "Reach beyond your followers is discounted by 25%",
       detail:
-        "Every post is scored at full strength for your own followers. For everyone else (out-of-network recommendation), the final score is multiplied by 0.75 — and that surface also runs extra spam/abuse-only drop rules your followers never see.",
-      source: "home-mixer/params/param.rs — OonWeightFactor = 0.75",
+        "Every post is scored at full strength for your own followers. For everyone else (out-of-network recommendation), the final score is multiplied by 0.75, and that surface also runs extra spam/abuse-only drop rules your followers never see.",
+      source: "home-mixer/params/param.rs: OonWeightFactor = 0.75",
       triggered: true,
     },
   ];
@@ -631,12 +631,12 @@ function buildRisks(f: FeatureReport, req: AnalyzeRequest): RiskFlag[] {
       detail: eligible
         ? `With ${req.authorFollowers.toLocaleString()} followers (≤ ${COLD_START_FOLLOWER_CAP.toLocaleString()} cap) and posted ${
             ageHours < 1 ? "just now" : `${ageHours.toFixed(0)}h ago`
-          } (≤ ${COLD_START_MAX_AGE_HOURS}h window), this post is eligible to be force-boosted into a top slot for some viewers — within the top ${(
+          } (≤ ${COLD_START_MAX_AGE_HOURS}h window), this post is eligible to be force-boosted into a top slot for some viewers, within the top ${(
             COLD_START_MAX_POSITION_RATIO * 100
           ).toFixed(
             0
-          )}% of ranked positions — bypassing the normal weighted-score ranking entirely. This is separate from, and on top of, the BESC Score above.`
-        : `Cold-start force-boosting only kicks in under ${COLD_START_FOLLOWER_CAP.toLocaleString()} followers and within a ${COLD_START_MAX_AGE_HOURS}h posting window — at ${req.authorFollowers.toLocaleString()} followers${
+          )}% of ranked positions, bypassing the normal weighted-score ranking entirely. This is separate from, and on top of, the BESC Score above.`
+        : `Cold-start force-boosting only kicks in under ${COLD_START_FOLLOWER_CAP.toLocaleString()} followers and within a ${COLD_START_MAX_AGE_HOURS}h posting window. At ${req.authorFollowers.toLocaleString()} followers${
             ageHours > COLD_START_MAX_AGE_HOURS ? ` and ${ageHours.toFixed(0)}h old` : ""
           }, this post doesn't currently qualify.`,
       source:
@@ -656,7 +656,7 @@ function buildTips(f: FeatureReport, req: AnalyzeRequest, risks: RiskFlag[]): Ti
       id: "weak-opener",
       title: "Open with the point, not a wind-up",
       detail:
-        'Starting with "I think", "just wanted to", or "so," buries the actual claim. People decide whether to keep reading in the first few words — lead with the thing that matters.',
+        'Starting with "I think", "just wanted to", or "so," buries the actual claim. People decide whether to keep reading in the first few words, so lead with the thing that matters.',
       impact: "high",
     });
   }
@@ -686,7 +686,7 @@ function buildTips(f: FeatureReport, req: AnalyzeRequest, risks: RiskFlag[]): Ti
       id: "ask-question",
       title: "Give people a reason to reply, not just like",
       detail:
-        "Reply is weighted 5.0–20.0 (with the bidirectional-follow boost), versus 0.5 for a like — 10 to 40× more valuable. End with a genuine question or a clear stance people will want to respond to.",
+        "Reply is weighted 5.0–20.0 (with the bidirectional-follow boost), versus 0.5 for a like: 10 to 40× more valuable. End with a genuine question or a clear stance people will want to respond to.",
       impact: "high",
     });
   }
@@ -724,7 +724,7 @@ function buildTips(f: FeatureReport, req: AnalyzeRequest, risks: RiskFlag[]): Ti
       id: "too-long-verified",
       title: "Even long-form has a skim point",
       detail:
-        "X Premium lets you write past 280 characters, but readers still decide fast whether to keep going. Put the actual point in the first couple of sentences — don't rely on length alone to hold attention.",
+        "X Premium lets you write past 280 characters, but readers still decide fast whether to keep going. Put the actual point in the first couple of sentences instead of relying on length alone to hold attention.",
       impact: "low",
     });
   }
@@ -754,7 +754,7 @@ function buildTips(f: FeatureReport, req: AnalyzeRequest, risks: RiskFlag[]): Ti
       id: "tone-down",
       title: "Dial back the ALL-CAPS / !!! energy",
       detail:
-        "Report (-234), Mute (-58.8), and Not-interested (-43.2) are by far the largest weights in the whole model — negative. It takes very little of that reaction to wipe out a lot of likes.",
+        "Report (-234), Mute (-58.8), and Not-interested (-43.2) are by far the largest weights in the whole model, and they're negative. It takes very little of that reaction to wipe out a lot of likes.",
       impact: "high",
     });
   }
@@ -764,7 +764,7 @@ function buildTips(f: FeatureReport, req: AnalyzeRequest, risks: RiskFlag[]): Ti
       id: "cut-hashtags",
       title: "Cut hashtags down to 1-2 relevant ones",
       detail:
-        "Beyond a couple of targeted hashtags, more tags read as spam and add nothing — reach comes from the ranking model, not from hashtag volume.",
+        "Beyond a couple of targeted hashtags, more tags read as spam and add nothing. Reach comes from the ranking model, not from hashtag volume.",
       impact: "medium",
     });
   }
@@ -772,7 +772,7 @@ function buildTips(f: FeatureReport, req: AnalyzeRequest, risks: RiskFlag[]): Ti
   if (!f.hasNumbers && !f.hasThreadMarker && f.words > 15) {
     tips.push({
       id: "make-shareable",
-      title: "Give it a concrete hook — a stat, a claim, a story beat",
+      title: "Give it a concrete hook: a stat, a claim, a story beat",
       detail:
         "Share via copy-link is the single highest-weighted action in the model (20.0). Concrete, specific claims are what people actually screenshot or copy-link to send to a friend.",
       impact: "medium",
@@ -784,7 +784,7 @@ function buildTips(f: FeatureReport, req: AnalyzeRequest, risks: RiskFlag[]): Ti
       id: "mutual-reply-bonus",
       title: "Good move: replying inside a mutual-follow thread",
       detail:
-        "Original-post replies between two accounts that follow each other get a +15.0 boost on top of the base 5.0 reply weight — the single largest situational boost in the model.",
+        "Original-post replies between two accounts that follow each other get a +15.0 boost on top of the base 5.0 reply weight, the single largest situational boost in the model.",
       impact: "low",
     });
   }

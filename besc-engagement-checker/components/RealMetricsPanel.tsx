@@ -42,7 +42,7 @@ export default function RealMetricsPanel({ data }: { data: TweetImportResult }) 
       </div>
       <p className="mt-3 text-[12.5px] leading-relaxed text-white/40">
         Pulled live via Vee3. The BESC Score below is what our heuristic predicts for this text
-        and media — compare it against what the post actually did.
+        and media. Compare it against what the post actually did.
       </p>
     </motion.div>
   );

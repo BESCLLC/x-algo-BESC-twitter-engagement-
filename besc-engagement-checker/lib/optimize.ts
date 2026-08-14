@@ -94,13 +94,13 @@ function buildRules(protectedWords: Set<string>, charLimit: number): Rule[] {
     id: "fix-all-caps",
     label: "Fixed ALL-CAPS shouting",
     reason:
-      "A high all-caps ratio pushes up Not-interested/Mute/Report propensity — the three most negative weights in the model.",
+      "A high all-caps ratio pushes up Not-interested/Mute/Report propensity, the three most negative weights in the model.",
     transform: (t: string) => fixAllCapsShouting(t, protectedWords),
   },
   {
     id: "cap-hashtags",
     label: "Trimmed hashtags to 2",
-    reason: "Hashtags beyond a couple read as stuffing — reach comes from the ranking model, not tag volume.",
+    reason: "Hashtags beyond a couple read as stuffing. Reach comes from the ranking model, not tag volume.",
     transform: (t) => capHashtags(t, 2),
   },
   {
@@ -114,13 +114,13 @@ function buildRules(protectedWords: Set<string>, charLimit: number): Rule[] {
     id: "cut-filler",
     label: "Cut filler/hedge words",
     reason:
-      'Words like "very", "just", "actually", and "I think" dilute a claim without adding information — tighter phrasing reads more direct and holds attention better.',
+      'Words like "very", "just", "actually", and "I think" dilute a claim without adding information. Tighter phrasing reads more direct and holds attention better.',
     transform: stripFillerWords,
   },
   {
     id: "add-reply-hook",
     label: "Added a genuine reply hook",
-    reason: "Reply is weighted 5.0–20.0 vs 0.5 for a like — 10–40x more valuable. A real question gives people a reason to respond.",
+    reason: "Reply is weighted 5.0–20.0 vs 0.5 for a like: 10–40x more valuable. A real question gives people a reason to respond.",
     transform: (t: string) => addReplyHook(t, charLimit),
   },
   {
@@ -205,6 +205,7 @@ export function optimizePost(req: AnalyzeRequest): OptimizeResult {
         applied: Array.from(appliedMap.values()),
         before,
         after: currentScore,
+        aiStatus: "disabled",
       }
     : {
         originalText: req.text,
@@ -212,5 +213,6 @@ export function optimizePost(req: AnalyzeRequest): OptimizeResult {
         applied: [],
         before,
         after: before,
+        aiStatus: "disabled",
       };
 }

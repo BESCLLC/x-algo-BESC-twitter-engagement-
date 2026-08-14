@@ -65,7 +65,7 @@ export default function Home() {
             style={{ animationFillMode: "backwards" }}
           >
             This isn&apos;t vibes-based advice. Every number below traces back to a
-            real weight or rule in this repo — the same{" "}
+            real weight or rule in this repo, the same{" "}
             <code className="rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[13px] text-white/70">
               RankingScorer
             </code>{" "}
@@ -132,7 +132,7 @@ export default function Home() {
                 <div className="glass-panel flex flex-col items-start gap-2 p-5 text-[13px] leading-relaxed text-white/40 sm:flex-row sm:items-center sm:justify-between">
                   <p className="max-w-xl">
                     This score is a transparent, heuristic estimator built on real
-                    production weights — it does not run X&apos;s actual Phoenix model
+                    production weights. It does not run X&apos;s actual Phoenix model
                     or your real account/viewer history, so treat it as directional
                     coaching, not a guarantee.
                   </p>

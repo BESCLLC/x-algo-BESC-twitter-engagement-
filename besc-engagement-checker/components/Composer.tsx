@@ -106,7 +106,7 @@ export default function Composer({
       setOptimizeResult(data as OptimizeResult);
     } catch (e) {
       const err = e as Error;
-      setOptimizeError(err.name === "AbortError" ? "Optimize timed out — try again." : err.message);
+      setOptimizeError(err.name === "AbortError" ? "Optimize timed out. Try again." : err.message);
     } finally {
       setOptimizing(false);
     }
@@ -145,7 +145,7 @@ export default function Composer({
       onImport?.(imported);
     } catch (e) {
       const err = e as Error;
-      setImportError(err.name === "AbortError" ? "Import timed out — try again." : err.message);
+      setImportError(err.name === "AbortError" ? "Import timed out. Try again." : err.message);
     } finally {
       clearTimeout(timeoutId);
       setImporting(false);
@@ -332,7 +332,7 @@ export default function Composer({
           inputMode="numeric"
           value={authorFollowers}
           onChange={(e) => setAuthorFollowers(e.target.value)}
-          placeholder="Your follower count (optional — unlocks the cold-start boost check)"
+          placeholder="Your follower count (optional, unlocks the cold-start boost check)"
           className="w-full min-w-0 bg-transparent text-sm text-white/80 placeholder:text-white/25 focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         />
       </div>
@@ -383,7 +383,7 @@ export default function Composer({
           <div className="flex items-center justify-between">
             <span className="text-sm font-semibold text-white/85">
               {optimizeResult.applied.length === 0
-                ? "Already clean — no mechanical fixes found"
+                ? "Already clean, no mechanical fixes found"
                 : `${optimizeResult.applied.length} fix${optimizeResult.applied.length > 1 ? "es" : ""} applied`}
             </span>
             <span className="flex items-center gap-1.5 font-mono text-sm tabular-nums">
@@ -441,11 +441,16 @@ export default function Composer({
             </>
           )}
 
-          {optimizeResult.aiCandidates && optimizeResult.aiCandidates.length > 0 && (
-            <div className="mt-4 space-y-2.5 border-t border-white/10 pt-3.5">
-              <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-besc-300">
-                <Sparkles className="h-3.5 w-3.5" /> AI-suggested rewrites (score higher than above)
-              </p>
+          <div className="mt-4 flex items-center gap-1.5 border-t border-white/10 pt-3 text-[11px] text-white/35">
+            <Sparkles className="h-3.5 w-3.5 shrink-0" />
+            {optimizeResult.aiStatus === "disabled" && "AI rewrites are off. Ollama isn't configured for this deployment."}
+            {optimizeResult.aiStatus === "error" && "AI rewrite failed to respond. Showing the mechanical fixes only."}
+            {optimizeResult.aiStatus === "no_improvement" && "AI checked this draft and didn't find a rewrite that scores higher."}
+            {optimizeResult.aiStatus === "found" && "AI found rewrites that score higher than the mechanical fixes above."}
+          </div>
+
+          {optimizeResult.aiStatus === "found" && optimizeResult.aiCandidates && (
+            <div className="mt-2.5 space-y-2.5">
               {optimizeResult.aiCandidates.map((candidate, i) => (
                 <div key={i} className="rounded-xl border border-white/10 bg-black/25 p-3">
                   <div className="mb-1.5 flex items-center justify-between">

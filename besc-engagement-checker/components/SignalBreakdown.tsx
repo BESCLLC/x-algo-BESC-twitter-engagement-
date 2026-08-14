@@ -57,7 +57,7 @@ export default function SignalBreakdown({ actions }: { actions: ActionRow[] }) {
           />
         </div>
         <p className="mt-1 truncate text-[11px] text-white/35">
-          weight {a.weight.toFixed(2)} × P {(a.probability * 100).toFixed(0)}% —{" "}
+          weight {a.weight.toFixed(2)} × P {(a.probability * 100).toFixed(0)}%:{" "}
           <span className="text-white/25">{a.weightSource}</span>
         </p>
       </div>

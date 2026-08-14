@@ -21,14 +21,14 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "BESC Engagement Checker — Score your post before you post it",
+  title: "BESC Engagement Checker: Score your post before you post it",
   description:
     "Paste your draft post and get an instant, transparent score built on the real ranking weights and visibility-filtering rules from X's open-sourced For You algorithm.",
   metadataBase: new URL("https://bescfinancial.com"),
   openGraph: {
     title: "BESC Engagement Checker",
     description:
-      "Score your X post before you post it — grounded in the real, open-sourced ranking algorithm.",
+      "Score your X post before you post it. Grounded in the real, open-sourced ranking algorithm.",
     type: "website",
     images: ["/besc-banner.png"],
   },

@@ -3,7 +3,7 @@ import { optimizePost } from "@/lib/optimize";
 import { parseAnalyzeRequest } from "@/lib/request";
 import { analyzePost } from "@/lib/scoring";
 import { generateRewriteCandidates, ollamaConfigured } from "@/lib/ollama";
-import type { AICandidate, AnalyzeRequest } from "@/lib/types";
+import type { AICandidate, AIStatus, AnalyzeRequest } from "@/lib/types";
 
 export async function POST(req: NextRequest) {
   let body: Partial<AnalyzeRequest>;
@@ -20,23 +20,31 @@ export async function POST(req: NextRequest) {
 
   const result = optimizePost(parsed);
 
-  if (ollamaConfigured()) {
-    try {
-      const candidates = await generateRewriteCandidates(result.optimizedText, 2);
-      const scored: AICandidate[] = candidates
-        .map((text) => ({ text, score: analyzePost({ ...parsed, text }).score }))
-        .filter((c) => c.score > result.after.score)
-        .sort((a, b) => b.score - a.score);
-      if (scored.length > 0) {
-        return NextResponse.json({ ...result, aiCandidates: scored });
-      }
-    } catch (err) {
-      // The AI rewrite is a bonus layer on top of the always-available
-      // deterministic optimizer — a failure here should never break the
-      // response, just fall through and return the mechanical result.
-      console.error("[optimize] Ollama rewrite skipped:", err instanceof Error ? err.message : err);
-    }
+  if (!ollamaConfigured()) {
+    return NextResponse.json({ ...result, aiStatus: "disabled" satisfies AIStatus });
   }
 
-  return NextResponse.json(result);
+  try {
+    const candidates = await generateRewriteCandidates(result.optimizedText, 2);
+    const scored: AICandidate[] = candidates
+      .map((text) => ({ text, score: analyzePost({ ...parsed, text }).score }))
+      .filter((c) => c.score > result.after.score)
+      .sort((a, b) => b.score - a.score);
+
+    if (scored.length > 0) {
+      return NextResponse.json({
+        ...result,
+        aiStatus: "found" satisfies AIStatus,
+        aiCandidates: scored,
+      });
+    }
+    return NextResponse.json({ ...result, aiStatus: "no_improvement" satisfies AIStatus });
+  } catch (err) {
+    // The AI rewrite is a bonus layer on top of the always-available
+    // deterministic optimizer — a failure here should never break the
+    // response, just fall through and return the mechanical result with an
+    // honest status instead of silently pretending AI wasn't attempted.
+    console.error("[optimize] Ollama rewrite failed:", err instanceof Error ? err.message : err);
+    return NextResponse.json({ ...result, aiStatus: "error" satisfies AIStatus });
+  }
 }

@@ -98,13 +98,17 @@ export interface AICandidate {
   score: number;
 }
 
+export type AIStatus = "disabled" | "error" | "no_improvement" | "found";
+
 export interface OptimizeResult {
   originalText: string;
   optimizedText: string;
   applied: OptimizeStep[];
   before: ScoreResult;
   after: ScoreResult;
-  /** Optional AI-generated rewrites (only present when Ollama is configured), each scoring strictly higher than the deterministic result. */
+  /** Always present so the UI can show real AI status instead of silently omitting the section. */
+  aiStatus: AIStatus;
+  /** Populated only when aiStatus is "found" — each candidate scores strictly higher than the deterministic result. */
   aiCandidates?: AICandidate[];
 }
 
