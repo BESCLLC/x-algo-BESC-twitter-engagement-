@@ -74,6 +74,7 @@ export interface TweetImportResult {
   recentPostsCount: number;
   postedHoursAgo: number;
   realMetrics: {
+    views: number;
     likes: number;
     retweets: number;
     replies: number;

@@ -92,11 +92,12 @@ function buildResult(raw: Raw, recentPostsCount: number): TweetImportResult {
     link: firstExternalLink(raw),
     authorHandle: pick<string>(author, ["user_name", "screen_name", "username"], ""),
     authorName: pick<string>(author, ["name", "display_name"], ""),
-    authorFollowers: Number(pick<number>(author, ["followers_count", "followers"], 0)) || 0,
-    authorVerified: Boolean(pick<boolean>(author, ["is_blue_verified", "verified"], false)),
+    authorFollowers: Number(pick<number>(author, ["followers_count", "followers", "sub_count"], 0)) || 0,
+    authorVerified: Boolean(pick<boolean>(author, ["is_blue_verified", "blue_verified", "verified"], false)),
     recentPostsCount,
     postedHoursAgo: hoursSincePosted(raw),
     realMetrics: {
+      views: Number(pick<number | string>(raw, ["views", "view_count", "public_metrics.impression_count"], 0)) || 0,
       likes:
         Number(
           pick<number>(
@@ -141,17 +142,13 @@ function buildResult(raw: Raw, recentPostsCount: number): TweetImportResult {
   };
 }
 
-export async function importTweet(url: string): Promise<TweetImportResult & { _rawDebug?: Raw }> {
-  const { raw, id } = await fetchRawTweet(url);
+export async function importTweet(url: string): Promise<TweetImportResult> {
+  const { raw } = await fetchRawTweet(url);
 
   const author = pick<Raw>(raw, ["author", "user"], {});
   const authorHandle = pick<string>(author, ["user_name", "screen_name", "username"], "");
   const authorRestId = pick<string>(author, ["rest_id", "id"], "");
   const recentPostsCount = await countRecentPosts(authorHandle, authorRestId);
 
-  // TEMP: surface the raw Vee3 payload (Railway logs + response body) so we
-  // can fix any field-name mismatches in buildResult() against ground truth.
-  console.log(`[fetch-tweet debug] id=${id} raw=`, JSON.stringify(raw));
-
-  return { ...buildResult(raw, recentPostsCount), _rawDebug: raw };
+  return buildResult(raw, recentPostsCount);
 }

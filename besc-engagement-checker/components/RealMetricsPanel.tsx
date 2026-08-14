@@ -1,11 +1,12 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Heart, Repeat2, MessageCircle, Quote, Bookmark, BadgeCheck } from "lucide-react";
+import { Eye, Heart, Repeat2, MessageCircle, Quote, Bookmark, BadgeCheck } from "lucide-react";
 import type { TweetImportResult } from "@/lib/types";
 
 export default function RealMetricsPanel({ data }: { data: TweetImportResult }) {
   const stats = [
+    { label: "Views", value: data.realMetrics.views, icon: Eye },
     { label: "Likes", value: data.realMetrics.likes, icon: Heart },
     { label: "Reposts", value: data.realMetrics.retweets, icon: Repeat2 },
     { label: "Replies", value: data.realMetrics.replies, icon: MessageCircle },
@@ -28,7 +29,7 @@ export default function RealMetricsPanel({ data }: { data: TweetImportResult }) 
           </span>
         )}
       </div>
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5">
+      <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-6">
         {stats.map((s) => (
           <div key={s.label} className="glass-inset flex flex-col items-center gap-1 px-3 py-3 text-center">
             <s.icon className="h-4 w-4 text-white/35" />
