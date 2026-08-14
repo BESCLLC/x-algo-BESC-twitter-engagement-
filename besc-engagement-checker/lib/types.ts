@@ -229,3 +229,37 @@ export interface ScoreResult {
   /** 0 = pure heuristic, →1 = score largely driven by a model fitted to this author's real results. */
   calibrationStrength?: number;
 }
+
+/**
+ * A language model's read of one draft, expressed as multiples of this
+ * author's typical post. Both scores come back so the UI can show what the
+ * model's opinion actually changed rather than silently replacing a number.
+ */
+export interface AiEstimateResponse {
+  multipliers: Record<string, number>;
+  baselineScore: number;
+  result: ScoreResult;
+  /** Whether this estimator has been measured against the author's real posts, and how it did. */
+  evaluation: { llmWins: boolean; n: number; evaluatedAt: string } | null;
+}
+
+/**
+ * The actions a language model is asked to judge. Fewer than the full weight
+ * table: it can only reason about actions a reader would recognise from the
+ * text, so link clicks, dwell and video views stay heuristic.
+ */
+export const LLM_ACTIONS = [
+  "favorite",
+  "reply",
+  "retweet",
+  "quote",
+  "shareViaCopyLink",
+  "followAuthor",
+  "notInterested",
+  "muteAuthor",
+  "report",
+] as const;
+export type LlmAction = (typeof LLM_ACTIONS)[number];
+
+/** Multiples of this author's typical post, per action. Missing keys stay heuristic. */
+export type ActionMultipliers = Partial<Record<LlmAction, number>>;

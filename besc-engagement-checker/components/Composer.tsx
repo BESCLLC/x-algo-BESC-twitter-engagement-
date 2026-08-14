@@ -26,6 +26,7 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import type {
+  AiEstimateResponse,
   AnalyzeRequest,
   AuthorLookupResult,
   GenerateRequest,
@@ -36,6 +37,7 @@ import type {
   TweetImportResult,
 } from "@/lib/types";
 import { getCharLimit } from "@/lib/scoring";
+import AiReadPanel from "./AiReadPanel";
 
 // A candidate has to clear the deterministic score by this many BESC-score
 // points before it's applied automatically instead of requiring a manual
@@ -186,6 +188,55 @@ export default function Composer({
       setOptimizeError(err.name === "AbortError" ? "Optimize timed out. Try again." : err.message);
     } finally {
       setOptimizing(false);
+    }
+  }
+
+  const [aiRead, setAiRead] = useState<AiEstimateResponse | null>(null);
+  const [aiReading, setAiReading] = useState(false);
+  const [aiReadError, setAiReadError] = useState<string | null>(null);
+  // The exact text the AI read applies to. Once the draft moves on, the read
+  // is about a post that no longer exists, so it stops being shown rather
+  // than sitting there attached to the wrong words.
+  const [aiReadText, setAiReadText] = useState<string | null>(null);
+
+  async function getAiRead() {
+    if (!text.trim() || aiReading) return;
+    setAiReading(true);
+    setAiReadError(null);
+    setAiRead(null);
+    const readOf = text;
+    try {
+      const payload: AnalyzeRequest = {
+        text,
+        mediaType,
+        link,
+        isReply,
+        hasMutualFollowAudience,
+        recentPostsCount,
+        nsfw,
+        authorFollowers: parsedFollowers(),
+        postedHoursAgo,
+        isVerified,
+      };
+      const res = await fetch("/api/ai-estimate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...payload, handle: handleInput.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "The AI read failed");
+      const estimate = data as AiEstimateResponse;
+      setAiRead(estimate);
+      setAiReadText(readOf);
+      // Show the full breakdown under the AI's probabilities, not just a
+      // headline number — the next keystroke reverts it to the deterministic
+      // score, which is the right default.
+      setLastResult(estimate.result);
+      onResult(estimate.result);
+    } catch (e) {
+      setAiReadError((e as Error).message);
+    } finally {
+      setAiReading(false);
     }
   }
 
@@ -783,8 +834,28 @@ export default function Composer({
         )}
         Optimize for the algorithm
       </button>
+
+      <button
+        type="button"
+        onClick={getAiRead}
+        disabled={!text.trim() || aiReading}
+        className="mt-2 flex w-full items-center justify-center gap-2 rounded-2xl border border-white/12 bg-white/[0.03] py-2.5 text-[13px] font-medium text-white/65 transition-colors hover:bg-white/[0.06] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {aiReading ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Activity className="h-3.5 w-3.5" />
+        )}
+        {aiReading ? "Reading your draft…" : "Second opinion from the AI"}
+      </button>
+
       {trackError && <p className="mt-2 text-xs text-danger">{trackError}</p>}
       {optimizeError && <p className="mt-2 text-xs text-danger">{optimizeError}</p>}
+      {aiReadError && <p className="mt-2 text-xs text-danger">{aiReadError}</p>}
+
+      {aiRead && aiReadText === text && (
+        <AiReadPanel estimate={aiRead} />
+      )}
 
       {optimizeResult && (
         <div className="mt-4 rounded-2xl border border-besc-400/30 bg-besc-500/[0.06] p-4">

@@ -80,6 +80,15 @@ CREATE TABLE IF NOT EXISTS calibration_models (
 -- collide with each other — but one published tweet must never be claimed
 -- by two different tracked drafts.
 CREATE UNIQUE INDEX IF NOT EXISTS tracked_posts_tweet_idx ON tracked_posts (tweet_id) WHERE tweet_id IS NOT NULL;
+
+-- The result of testing an alternative probability estimator against this
+-- author's real outcomes. Stored because each run costs real model calls, so
+-- the verdict has to outlive the request that paid for it.
+CREATE TABLE IF NOT EXISTS estimator_evaluations (
+  handle       TEXT PRIMARY KEY,
+  evaluation   JSONB       NOT NULL,
+  evaluated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 `;
 
 // Cached on globalThis so concurrent requests share one in-flight schema

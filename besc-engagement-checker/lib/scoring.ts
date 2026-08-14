@@ -1,4 +1,5 @@
 import type {
+  ActionMultipliers,
   AnalyzeRequest,
   ActionRow,
   FeatureReport,
@@ -6,8 +7,15 @@ import type {
   ScoreResult,
   Tip,
 } from "./types";
+import { LLM_ACTIONS } from "./types";
 import { countFillerWords, passiveVoiceSentenceRatio, hasWeakOpener } from "./nlp";
-import { calibratedRate, calibratedRatio, featureVector, type CalibrationModel } from "./calibration";
+import {
+  calibratedRate,
+  calibratedRatio,
+  calibrationStrength,
+  featureVector,
+  type CalibrationModel,
+} from "./calibration";
 
 /**
  * ─────────────────────────────────────────────────────────────────────────
@@ -538,6 +546,42 @@ function applyCalibration(
   return out;
 }
 
+/**
+ * Folds in a language model's read of the draft, expressed in the same
+ * "multiple of this author's typical post" units the fitted regression uses.
+ *
+ * It is deliberately damped by how much real fitted data is already in play.
+ * Both estimates are answering the same question from overlapping evidence, so
+ * stacking them at full strength would double-count; and where measured
+ * outcomes exist they are the better evidence, so the model's opinion should
+ * recede as the fit earns trust rather than compete with it.
+ */
+function applyLlmMultipliers(
+  probabilities: ActionProbabilities,
+  multipliers: ActionMultipliers | null | undefined,
+  model?: CalibrationModel | null
+): ActionProbabilities {
+  if (!multipliers) return probabilities;
+
+  const room = 1 - calibrationStrength(model ?? null);
+  const out = { ...probabilities };
+  for (const action of LLM_ACTIONS) {
+    const raw = multipliers[action];
+    if (raw === undefined) continue;
+    const damped = 1 + room * (raw - 1);
+    out[action] = clamp01(out[action] * damped);
+  }
+  // The share family isn't separately judged — copy-link is the observable
+  // stand-in for "worth sending to someone", so it carries the other two.
+  const shareMultiplier = multipliers.shareViaCopyLink;
+  if (shareMultiplier !== undefined) {
+    const damped = 1 + room * (shareMultiplier - 1);
+    out.shareViaDm = clamp01(out.shareViaDm * damped);
+    out.share = clamp01(out.share * damped);
+  }
+  return out;
+}
+
 function buildActionRows(
   p: ActionProbabilities,
   req: AnalyzeRequest
@@ -1055,10 +1099,18 @@ function buildTips(f: FeatureReport, req: AnalyzeRequest, risks: RiskFlag[]): Ti
   return tips;
 }
 
-export function analyzePost(req: AnalyzeRequest, calibration?: CalibrationModel | null): ScoreResult {
+export function analyzePost(
+  req: AnalyzeRequest,
+  calibration?: CalibrationModel | null,
+  llmMultipliers?: ActionMultipliers | null
+): ScoreResult {
   const features = extractFeatures(req.text, req.link);
   const heuristic = estimateActionProbabilities(features, req);
-  const probabilities = applyCalibration(heuristic, features, req, calibration);
+  const probabilities = applyLlmMultipliers(
+    applyCalibration(heuristic, features, req, calibration),
+    llmMultipliers,
+    calibration
+  );
   const actions = buildActionRows(probabilities, req);
 
   const positiveContribution = actions

@@ -13,10 +13,12 @@ import {
   AtSign,
   Clock3,
   ChevronDown,
+  FlaskConical,
 } from "lucide-react";
 import type { CalibrationSide, TrackRecord, TrackSummary, TrackedPost } from "@/lib/types";
 import type { TimingInsights } from "@/lib/timing";
 import type { BacktestResult } from "@/lib/backtest";
+import type { EstimatorEvaluation } from "@/lib/evaluation";
 
 function compact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -39,6 +41,31 @@ export default function TrackRecordPanel({
   const [syncNote, setSyncNote] = useState<string | null>(null);
   const [learning, setLearning] = useState(false);
   const [learnNote, setLearnNote] = useState<string | null>(null);
+  const [evaluation, setEvaluation] = useState<EstimatorEvaluation | null>(null);
+  const [aiConfigured, setAiConfigured] = useState(false);
+  const [evaluating, setEvaluating] = useState(false);
+  const [evaluateError, setEvaluateError] = useState<string | null>(null);
+
+  async function runEstimatorTest() {
+    if (!handle.trim() || evaluating) return;
+    setEvaluating(true);
+    setEvaluateError(null);
+    try {
+      const res = await fetch("/api/track/evaluate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ handle: handle.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Couldn't run the test");
+      if (data.enabled === false) throw new Error("Tracking isn't set up on this deployment yet.");
+      setEvaluation(data.evaluation ?? null);
+    } catch (e) {
+      setEvaluateError((e as Error).message);
+    } finally {
+      setEvaluating(false);
+    }
+  }
 
   async function learnFromHistory() {
     if (!handle.trim() || learning) return;
@@ -81,16 +108,28 @@ export default function TrackRecordPanel({
   const load = useCallback(async () => {
     if (!handle.trim()) {
       setRecord(null);
+      setEvaluation(null);
       return;
     }
     setLoading(true);
     setError(null);
     try {
       const tz = new Date().getTimezoneOffset();
-      const res = await fetch(`/api/track?handle=${encodeURIComponent(handle.trim())}&tz=${tz}`);
+      const query = encodeURIComponent(handle.trim());
+      // The stored estimator verdict rides along with the record: it's cheap
+      // to read and expensive to recompute, and a failure here must not take
+      // the track record down with it.
+      const [res, evalRes] = await Promise.all([
+        fetch(`/api/track?handle=${query}&tz=${tz}`),
+        fetch(`/api/track/evaluate?handle=${query}`).catch(() => null),
+      ]);
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Couldn't load your track record");
       setRecord(data);
+
+      const evalData = evalRes?.ok ? await evalRes.json().catch(() => null) : null;
+      setEvaluation(evalData?.evaluation ?? null);
+      setAiConfigured(Boolean(evalData?.aiConfigured));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -234,6 +273,15 @@ export default function TrackRecordPanel({
       )}
 
       {record?.accuracy && <Accuracy accuracy={record.accuracy} />}
+      {aiConfigured && (
+        <EstimatorTest
+          evaluation={evaluation}
+          running={evaluating}
+          error={evaluateError}
+          onRun={runEstimatorTest}
+          canRun={Boolean(handle.trim())}
+        />
+      )}
       {summary && <Summary summary={summary} />}
       {record?.timing && <Timing timing={record.timing} />}
 
@@ -287,7 +335,7 @@ function Accuracy({ accuracy }: { accuracy: BacktestResult }) {
     );
   }
 
-  const r = Math.max(accuracy.viewsCorrelation ?? -1, accuracy.engagementRateCorrelation ?? -1);
+  const r = Math.max(accuracy.viewsCorrelation ?? 0, accuracy.engagementRateCorrelation ?? 0);
   const tone =
     accuracy.verdict === "predictive"
       ? "border-besc-400/35 bg-besc-500/[0.08]"
@@ -329,6 +377,94 @@ function Accuracy({ accuracy }: { accuracy: BacktestResult }) {
       <p className="mt-2 text-[11px] leading-relaxed text-white/30">
         Rank correlation over every post measured, because the score's job is ordering drafts
         rather than forecasting a view count.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The AI estimator on trial. It sits directly under the scorer's own accuracy
+ * because it's the same question asked of a different estimator, and because
+ * the honest answer to "should I trust the AI read?" is whichever one ranked
+ * this author's real posts better — not whichever one sounds more advanced.
+ */
+function EstimatorTest({
+  evaluation,
+  running,
+  error,
+  onRun,
+  canRun,
+}: {
+  evaluation: EstimatorEvaluation | null;
+  running: boolean;
+  error: string | null;
+  onRun: () => void;
+  canRun: boolean;
+}) {
+  const best = (r: BacktestResult) =>
+    Math.max(r.viewsCorrelation ?? 0, r.engagementRateCorrelation ?? 0);
+
+  return (
+    <div className="mt-3 rounded-xl border border-white/10 bg-black/25 p-3.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-semibold text-white/70">Does the AI read beat the score?</p>
+        <button
+          type="button"
+          onClick={onRun}
+          disabled={running || !canRun}
+          className="flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.04] px-3 py-1 text-[11px] font-medium text-white/60 transition-colors hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {running ? <Loader2 className="h-3 w-3 animate-spin" /> : <FlaskConical className="h-3 w-3" />}
+          {running ? "Testing on your posts…" : evaluation ? "Test again" : "Run the test"}
+        </button>
+      </div>
+
+      {error && <p className="mt-2 text-xs text-danger">{error}</p>}
+
+      {!evaluation ? (
+        <p className="mt-1.5 text-[12.5px] leading-relaxed text-white/45">
+          Scores your published posts twice — once with the built-in heuristics, once with an
+          AI that has read X&apos;s ranking rules — and reports which one ordered your real
+          results better. Takes a minute and costs a handful of model calls.
+        </p>
+      ) : evaluation.llm.verdict === "insufficient" ? (
+        <p className="mt-1.5 text-[12.5px] leading-relaxed text-white/45">
+          Only {evaluation.n} post{evaluation.n === 1 ? "" : "s"} came back usable —
+          {" "}{evaluation.llm.minimumForVerdict} are needed before the comparison means
+          anything.
+        </p>
+      ) : (
+        <>
+          <p className="mt-1.5 text-[12.5px] leading-relaxed text-white/50">
+            {evaluation.llmWins
+              ? "The AI read ordered your real results better than the heuristic score. Its second opinion on a draft is worth weighting."
+              : "The AI read did not order your real results better than the heuristic score. It's still a useful sanity check, but it hasn't earned more than that on your account."}
+          </p>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <EstimatorScore label="Heuristic score" r={best(evaluation.heuristic)} won={!evaluation.llmWins} />
+            <EstimatorScore label="AI probabilities" r={best(evaluation.llm)} won={evaluation.llmWins} />
+          </div>
+          <p className="mt-2 text-[11px] leading-relaxed text-white/30">
+            Rank correlation on {evaluation.n} of your published posts
+            {evaluation.skipped > 0 ? `, ${evaluation.skipped} skipped` : ""} · both run through
+            the same real weights, with only the action probabilities swapped.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function EstimatorScore({ label, r, won }: { label: string; r: number; won: boolean }) {
+  return (
+    <div
+      className={`rounded-lg border px-3 py-2 ${
+        won ? "border-besc-400/35 bg-besc-500/[0.08]" : "border-white/10 bg-white/[0.02]"
+      }`}
+    >
+      <p className="text-[11px] text-white/40">{label}</p>
+      <p className={`mt-0.5 font-mono text-sm tabular-nums ${won ? "text-besc-200" : "text-white/60"}`}>
+        r={r.toFixed(2)}
       </p>
     </div>
   );

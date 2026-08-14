@@ -120,6 +120,21 @@ export function backtest(samples: BacktestSample[]): BacktestResult {
   return result;
 }
 
+/**
+ * The strongest usable signal a result found. A null correlation means no
+ * signal was measurable, which is 0 — emphatically not a negative score. An
+ * earlier version treated null as -1, which let a challenger that ranked
+ * outcomes *backwards* count as a win over a baseline that simply found
+ * nothing. Backwards is worse than nothing, not better.
+ */
+function signalStrength(r: BacktestResult): number {
+  return Math.max(r.viewsCorrelation ?? 0, r.engagementRateCorrelation ?? 0);
+}
+
+// Rank correlations wobble by a few hundredths on samples this size, so a
+// hairline lead isn't evidence of anything.
+const WIN_MARGIN = 0.05;
+
 /** Head-to-head, so a proposed estimator has to beat the incumbent on the same posts. */
 export function compareEstimators(
   baseline: BacktestSample[],
@@ -127,7 +142,15 @@ export function compareEstimators(
 ): { baseline: BacktestResult; challenger: BacktestResult; challengerWins: boolean } {
   const b = backtest(baseline);
   const c = backtest(challenger);
-  const score = (r: BacktestResult) =>
-    Math.max(r.viewsCorrelation ?? -1, r.engagementRateCorrelation ?? -1);
-  return { baseline: b, challenger: c, challengerWins: score(c) > score(b) };
+
+  // Three conditions, all required. The challenger has to have found a real
+  // signal of its own, beat the incumbent by more than noise, and not be
+  // ranking outcomes backwards on the other measure while it does it.
+  const challengerWins =
+    c.verdict !== "insufficient" &&
+    c.verdict !== "inverted" &&
+    signalStrength(c) >= WEAK &&
+    signalStrength(c) >= signalStrength(b) + WIN_MARGIN;
+
+  return { baseline: b, challenger: c, challengerWins };
 }

@@ -33,6 +33,7 @@ const SECTIONS = [
   { id: "ai", label: "AI rewrite & generate" },
   { id: "import", label: "Import a live post" },
   { id: "tracking", label: "Track record" },
+  { id: "ai-estimate", label: "The AI second opinion" },
   { id: "sources", label: "Where the numbers come from" },
 ];
 
@@ -547,6 +548,52 @@ export default function Docs() {
             <P className="text-white/40">
               Tracking needs a database to be attached to the deployment. Without one it reports
               itself as unavailable and everything else works exactly as before.
+            </P>
+          </Section>
+
+          <Section id="ai-estimate" title="The AI second opinion">
+            <P>
+              <strong>Second opinion from the AI</strong> hands your draft to a model that has been
+              given the real weight table, the visibility-filtering rules and the structural limits,
+              and asks it one narrow question per action: how does this post compare to a typical
+              post from this account?
+            </P>
+            <P>
+              It answers in multipliers — <Mono>1.0</Mono> is &quot;typical for you&quot;,{" "}
+              <Mono>2.0</Mono> is &quot;about twice as likely&quot; — never in absolute
+              probabilities. Language models are genuinely good at relative judgements about text
+              and genuinely bad at absolute rates, which depend on follower count, timing and
+              audience, none of which are in the words. Those multipliers then feed the same real
+              production weights as every other number here; nothing about the scoring maths
+              changes.
+            </P>
+            <P>
+              It runs only when you press the button, never on every keystroke, and the read applies
+              to that exact draft — edit the text and the panel clears rather than describing a post
+              that no longer exists.
+            </P>
+
+            <SubHead>Why it&apos;s put on trial</SubHead>
+            <P>
+              A language model will produce confident numbers whether or not those numbers predict
+              anything, and there is no way to tell the two apart by reading them. So{" "}
+              <strong>Does the AI read beat the score?</strong> in your track record scores your
+              published posts twice — once with the built-in heuristics, once with the AI&apos;s
+              probabilities — and reports which one ordered your <em>real</em> results better.
+              Same posts, same weights, only the probabilities swapped.
+            </P>
+            <Callout tone="warn" title="A tie goes to the incumbent">
+              The AI head is only reported as a win when it beats the heuristic outright on your own
+              published history. If it loses, the panel says so and keeps saying so — an estimator
+              that sounds sophisticated and predicts nothing is precisely what this tool exists to
+              catch, including when it&apos;s our own. Until you run the test, the AI read is
+              labelled as an untested opinion rather than a measurement.
+            </Callout>
+            <P className="text-white/40">
+              Its influence is also damped by how much of your score already comes from a model
+              fitted to your real outcomes. Both are estimating the same thing from overlapping
+              evidence, so stacking them at full strength would double-count — and where measured
+              outcomes exist, they are the better evidence.
             </P>
           </Section>
 
