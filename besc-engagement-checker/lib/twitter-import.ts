@@ -37,6 +37,28 @@ function detectMediaType(raw: Raw): MediaType {
   return "photo";
 }
 
+// Twitter/X API tweet objects mark a reply via in_reply_to_status_id (legacy
+// v1.1 shape, null/absent when not a reply) or a "replied_to" entry in
+// referenced_tweets (v2 shape). Checking both since Vee3's exact shape isn't
+// published — see the module comment above pick().
+export function detectIsReply(raw: Raw): boolean {
+  const directId = pick<string | number | null>(
+    raw,
+    ["in_reply_to_status_id", "in_reply_to_status_id_str", "legacy.in_reply_to_status_id_str"],
+    null
+  );
+  if (directId !== null && directId !== undefined && directId !== "") return true;
+
+  const referenced = pick<any[]>(raw, ["referenced_tweets"], []);
+  return Array.isArray(referenced) && referenced.some((r) => pick<string>(r, ["type"], "") === "replied_to");
+}
+
+export function detectSensitive(raw: Raw): boolean {
+  return Boolean(
+    pick<boolean>(raw, ["possibly_sensitive", "possibly_sensitive_editable", "legacy.possibly_sensitive"], false)
+  );
+}
+
 function firstExternalLink(raw: Raw): string {
   const urls = pick<any[]>(raw, ["entities.urls", "urls"], []);
   if (!Array.isArray(urls) || urls.length === 0) return "";
@@ -90,6 +112,8 @@ function buildResult(raw: Raw, recentPostsCount: number): TweetImportResult {
     text,
     mediaType: detectMediaType(raw),
     link: firstExternalLink(raw),
+    isReply: detectIsReply(raw),
+    nsfw: detectSensitive(raw),
     authorHandle: pick<string>(author, ["user_name", "screen_name", "username"], ""),
     authorName: pick<string>(author, ["name", "display_name"], ""),
     authorFollowers: Number(pick<number>(author, ["followers_count", "followers", "sub_count"], 0)) || 0,

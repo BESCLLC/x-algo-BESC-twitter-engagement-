@@ -208,6 +208,11 @@ export default function Composer({
       setText(imported.text);
       setMediaType(imported.mediaType);
       setLink(imported.link);
+      setIsReply(imported.isReply);
+      // hasMutualFollowAudience is deliberately left alone here — it's an
+      // aggregate fact about your overall follower composition, not
+      // something a single tweet lookup can tell us. Still yours to set.
+      setNsfw(imported.nsfw);
       setRecentPostsCount(imported.recentPostsCount);
       setAuthorFollowers(String(imported.authorFollowers));
       setPostedHoursAgo(imported.postedHoursAgo);

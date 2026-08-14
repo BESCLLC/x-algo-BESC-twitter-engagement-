@@ -81,6 +81,10 @@ export interface TweetImportResult {
   text: string;
   mediaType: MediaType;
   link: string;
+  /** Was this tweet itself posted as a reply (in_reply_to_status_id present)? */
+  isReply: boolean;
+  /** Vee3's possibly_sensitive flag, if present. */
+  nsfw: boolean;
   authorHandle: string;
   authorName: string;
   authorFollowers: number;
