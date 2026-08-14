@@ -20,16 +20,26 @@ const mono = JetBrains_Mono({
   weight: ["400", "500", "700"],
 });
 
+// This app's own domain, which is what relative asset paths below resolve
+// against — notably the OG/Twitter card image, which lives in this app's
+// public/ directory and is therefore only served from here. Pointing this at
+// another domain silently breaks every link preview. Overridable so Railway
+// preview deploys can advertise their own URL without a code change.
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://xalgo.beschyperchain.com";
+
 export const metadata: Metadata = {
   title: "BESC Engagement Checker: Score your post before you post it",
   description:
     "Paste your draft post and get an instant, transparent score built on the real ranking weights and visibility-filtering rules from X's open-sourced For You algorithm.",
-  metadataBase: new URL("https://bescfinancial.com"),
+  metadataBase: new URL(SITE_URL),
+  alternates: { canonical: "/" },
   openGraph: {
     title: "BESC Engagement Checker",
     description:
       "Score your X post before you post it. Grounded in the real, open-sourced ranking algorithm.",
     type: "website",
+    url: SITE_URL,
+    siteName: "BESC Engagement Checker",
     images: ["/besc-banner.png"],
   },
   twitter: {

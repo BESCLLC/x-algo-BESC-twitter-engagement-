@@ -6,10 +6,20 @@ import Background from "@/components/Background";
 import SiteHeader from "@/components/SiteHeader";
 import SocialLinks from "@/components/SocialLinks";
 
+const DESCRIPTION =
+  "What every number, flag and button in the BESC Engagement Checker means, and exactly which part of X's open-sourced For You algorithm each one comes from.";
+
 export const metadata: Metadata = {
   title: "Docs · BESC Engagement Checker",
-  description:
-    "What every number, flag and button in the BESC Engagement Checker means, and exactly which part of X's open-sourced For You algorithm each one comes from.",
+  description: DESCRIPTION,
+  alternates: { canonical: "/docs" },
+  openGraph: {
+    title: "Docs · BESC Engagement Checker",
+    description: DESCRIPTION,
+    type: "article",
+    url: "/docs",
+    images: ["/besc-banner.png"],
+  },
 };
 
 const SECTIONS = [
