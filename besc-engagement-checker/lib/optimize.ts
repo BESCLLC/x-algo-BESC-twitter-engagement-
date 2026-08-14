@@ -4,11 +4,10 @@ import {
   REPLY_CTA_PHRASES,
   getHashtagWordSet,
   isShoutingCapsWord,
+  getCharLimit,
 } from "./scoring";
 import { stripFillerWords } from "./nlp";
 import type { AnalyzeRequest, OptimizeResult, OptimizeStep } from "./types";
-
-const CHAR_LIMIT = 280;
 
 function collapsePunctuationBursts(text: string): string {
   return text.replace(/[!?]{2,}/g, (m) => m[0]);
@@ -59,17 +58,17 @@ function stripBoilerplateCTA(text: string): string {
   return result.replace(/[ \t]{2,}/g, " ").replace(/\s+([.,!?])/g, "$1").trim();
 }
 
-function addReplyHook(text: string): string {
+function addReplyHook(text: string, charLimit: number): string {
   const lower = text.toLowerCase();
   if (text.includes("?") || REPLY_CTA_PHRASES.some((p) => lower.includes(p))) return text;
   const addition = " What do you think?";
-  if (text.length + addition.length > CHAR_LIMIT) return text;
+  if (text.length + addition.length > charLimit) return text;
   return text.trim() + addition;
 }
 
-function trimToCharLimit(text: string): string {
-  if (text.length <= CHAR_LIMIT) return text;
-  const cut = text.slice(0, CHAR_LIMIT - 1);
+function trimToCharLimit(text: string, charLimit: number): string {
+  if (text.length <= charLimit) return text;
+  const cut = text.slice(0, charLimit - 1);
   const lastSpace = cut.lastIndexOf(" ");
   return (lastSpace > 40 ? cut.slice(0, lastSpace) : cut).trim() + "…";
 }
@@ -83,7 +82,7 @@ interface Rule {
   forced?: boolean;
 }
 
-function buildRules(protectedWords: Set<string>): Rule[] {
+function buildRules(protectedWords: Set<string>, charLimit: number): Rule[] {
   return [
   {
     id: "collapse-punctuation",
@@ -122,13 +121,13 @@ function buildRules(protectedWords: Set<string>): Rule[] {
     id: "add-reply-hook",
     label: "Added a genuine reply hook",
     reason: "Reply is weighted 5.0–20.0 vs 0.5 for a like — 10–40x more valuable. A real question gives people a reason to respond.",
-    transform: addReplyHook,
+    transform: (t: string) => addReplyHook(t, charLimit),
   },
   {
     id: "trim-to-limit",
-    label: "Trimmed to fit the 280-character limit",
+    label: `Trimmed to fit the ${charLimit.toLocaleString()}-character limit`,
     reason: "Posts over the limit can't be published as-is.",
-    transform: trimToCharLimit,
+    transform: (t: string) => trimToCharLimit(t, charLimit),
     forced: true,
   },
   ];
@@ -149,7 +148,7 @@ const MAX_PASSES = 3;
 // re-running the whole list until nothing changes converges safely.
 export function optimizePost(req: AnalyzeRequest): OptimizeResult {
   const before = analyzePost(req);
-  const RULES = buildRules(getHashtagWordSet(req.text));
+  const RULES = buildRules(getHashtagWordSet(req.text), getCharLimit(req.isVerified));
   let current: AnalyzeRequest = { ...req };
   let currentScore = before;
   let anyForcedApplied = false;

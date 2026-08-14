@@ -16,6 +16,7 @@ import {
   X,
   Rocket,
   Sparkles,
+  BadgeCheck,
 } from "lucide-react";
 import type {
   AnalyzeRequest,
@@ -24,6 +25,7 @@ import type {
   ScoreResult,
   TweetImportResult,
 } from "@/lib/types";
+import { getCharLimit } from "@/lib/scoring";
 
 const MEDIA_OPTIONS: { id: MediaType; label: string; icon: typeof ImageIcon }[] = [
   { id: "none", label: "Text only", icon: Ban },
@@ -31,8 +33,6 @@ const MEDIA_OPTIONS: { id: MediaType; label: string; icon: typeof ImageIcon }[] 
   { id: "video", label: "Video", icon: Film },
   { id: "gif", label: "GIF", icon: Sticker },
 ];
-
-const CHAR_LIMIT = 280;
 
 export default function Composer({
   onResult,
@@ -50,6 +50,7 @@ export default function Composer({
   const [link, setLink] = useState("");
   const [isReplyToMutual, setIsReplyToMutual] = useState(false);
   const [nsfw, setNsfw] = useState(false);
+  const [isVerified, setIsVerified] = useState(false);
   const [recentPostsCount, setRecentPostsCount] = useState(0);
   const [authorFollowers, setAuthorFollowers] = useState("");
   const [postedHoursAgo, setPostedHoursAgo] = useState(0);
@@ -85,6 +86,7 @@ export default function Composer({
         nsfw,
         authorFollowers: parsedFollowers(),
         postedHoursAgo,
+        isVerified,
       };
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 100000);
@@ -139,6 +141,7 @@ export default function Composer({
       setRecentPostsCount(imported.recentPostsCount);
       setAuthorFollowers(String(imported.authorFollowers));
       setPostedHoursAgo(imported.postedHoursAgo);
+      setIsVerified(imported.authorVerified);
       onImport?.(imported);
     } catch (e) {
       const err = e as Error;
@@ -168,6 +171,7 @@ export default function Composer({
         nsfw,
         authorFollowers: parsedFollowers(),
         postedHoursAgo,
+        isVerified,
       };
       const res = await fetch("/api/analyze", {
         method: "POST",
@@ -194,10 +198,11 @@ export default function Composer({
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text, mediaType, link, isReplyToMutual, nsfw, recentPostsCount, authorFollowers, postedHoursAgo]);
+  }, [text, mediaType, link, isReplyToMutual, nsfw, recentPostsCount, authorFollowers, postedHoursAgo, isVerified]);
 
+  const charLimit = getCharLimit(isVerified);
   const chars = text.length;
-  const overLimit = chars > CHAR_LIMIT;
+  const overLimit = chars > charLimit;
 
   return (
     <div className="glass-panel p-5 sm:p-6">
@@ -208,7 +213,7 @@ export default function Composer({
             overLimit ? "text-danger" : "text-white/35"
           }`}
         >
-          {chars}/{CHAR_LIMIT}
+          {chars.toLocaleString()}/{charLimit.toLocaleString()}
         </span>
       </div>
 
@@ -301,6 +306,19 @@ export default function Composer({
             type="checkbox"
             checked={nsfw}
             onChange={(e) => setNsfw(e.target.checked)}
+            className="h-4 w-4 shrink-0 accent-besc-500"
+          />
+        </label>
+
+        <label className="flex cursor-pointer items-center justify-between gap-2 rounded-2xl border border-white/10 bg-black/20 px-3.5 py-2.5">
+          <span className="flex min-w-0 items-center gap-2 text-sm text-white/70">
+            <BadgeCheck className="h-4 w-4 shrink-0 text-white/35" />
+            <span className="truncate">Verified / Premium checkmark</span>
+          </span>
+          <input
+            type="checkbox"
+            checked={isVerified}
+            onChange={(e) => setIsVerified(e.target.checked)}
             className="h-4 w-4 shrink-0 accent-besc-500"
           />
         </label>

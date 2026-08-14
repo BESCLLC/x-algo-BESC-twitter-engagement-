@@ -1,6 +1,9 @@
 import type { AnalyzeRequest, MediaType } from "./types";
 
-const MAX_CHARS = 4000;
+// Hard payload cap, not the platform post limit — kept above
+// VERIFIED_CHAR_LIMIT (4,000, see scoring.ts) so a legitimate long-form
+// verified draft doesn't get silently truncated before it's even scored.
+const MAX_CHARS = 6000;
 const VALID_MEDIA: MediaType[] = ["none", "photo", "video", "gif"];
 
 export function parseAnalyzeRequest(body: Partial<AnalyzeRequest>): AnalyzeRequest | null {
@@ -30,5 +33,6 @@ export function parseAnalyzeRequest(body: Partial<AnalyzeRequest>): AnalyzeReque
     nsfw: Boolean(body.nsfw),
     authorFollowers,
     postedHoursAgo,
+    isVerified: Boolean(body.isVerified),
   };
 }

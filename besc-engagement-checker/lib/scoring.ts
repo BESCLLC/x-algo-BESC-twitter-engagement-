@@ -51,6 +51,18 @@ export const COLD_START_FOLLOWER_CAP = 1000;
 export const COLD_START_MAX_AGE_HOURS = 24; // 86400 secs
 export const COLD_START_MAX_POSITION_RATIO = 0.85;
 
+// X platform posting limits (not a repo-cited ranking weight — this is the
+// literal composer character cap). Free accounts: 280. X Premium: 4,000.
+// Premium+ / Verified Organizations: 25,000. We only know "verified: yes/no"
+// from available data, not which paid tier, so 4,000 is used as a safe floor
+// for any verified account — it never overstates what a given tier allows.
+export const STANDARD_CHAR_LIMIT = 280;
+export const VERIFIED_CHAR_LIMIT = 4000;
+
+export function getCharLimit(isVerified?: boolean): number {
+  return isVerified ? VERIFIED_CHAR_LIMIT : STANDARD_CHAR_LIMIT;
+}
+
 export function authorDiversityMultiplier(k: number): number {
   return (
     (1 - AUTHOR_DIVERSITY_FLOOR) * Math.pow(AUTHOR_DIVERSITY_DECAY, k) +
@@ -699,12 +711,20 @@ function buildTips(f: FeatureReport, req: AnalyzeRequest, risks: RiskFlag[]): Ti
     });
   }
 
-  if (f.words > 70) {
+  if (f.words > 70 && !req.isVerified) {
     tips.push({
       id: "too-long",
       title: "Trim it down",
       detail:
         "Long, dense posts lose skimmers before they reach your point. Aim for a tight ~15-45 words, or restructure as a thread so each post pulls its own weight.",
+      impact: "low",
+    });
+  } else if (f.words > 400 && req.isVerified) {
+    tips.push({
+      id: "too-long-verified",
+      title: "Even long-form has a skim point",
+      detail:
+        "X Premium lets you write past 280 characters, but readers still decide fast whether to keep going. Put the actual point in the first couple of sentences — don't rely on length alone to hold attention.",
       impact: "low",
     });
   }

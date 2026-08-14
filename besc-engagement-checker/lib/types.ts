@@ -11,6 +11,8 @@ export interface AnalyzeRequest {
   authorFollowers?: number;
   /** Hours since this post went live. Omit/0 for a not-yet-posted draft (posting now). */
   postedHoursAgo?: number;
+  /** X Premium / verified checkmark — raises the character limit from 280 to 4,000+. */
+  isVerified?: boolean;
 }
 
 export interface ActionRow {
