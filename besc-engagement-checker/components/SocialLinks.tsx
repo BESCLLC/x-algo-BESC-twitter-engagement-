@@ -27,7 +27,7 @@ export default function SocialLinks({
   variant?: "compact" | "labeled";
 }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center justify-center gap-2">
       {LINKS.map((l) => {
         const Icon = l.icon;
         return (

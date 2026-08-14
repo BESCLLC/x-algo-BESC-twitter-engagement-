@@ -80,11 +80,11 @@ export default function Home() {
       </section>
 
       <section className="mx-auto grid max-w-7xl gap-6 px-5 pb-24 sm:px-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:items-start">
-        <div className="lg:sticky lg:top-6">
+        <div className="min-w-0 lg:sticky lg:top-6">
           <Composer onResult={setResult} onLoading={setLoading} onImport={setImported} />
         </div>
 
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           <AnimatePresence mode="wait">
             {!result ? (
               <motion.div
