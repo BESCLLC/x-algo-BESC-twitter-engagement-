@@ -1,4 +1,4 @@
-import { buildRewritePrompt, parseVariants } from "./aiPrompt";
+import { buildGeneratePrompt, buildRewritePrompt, parseVariants } from "./aiPrompt";
 
 export class GeminiError extends Error {}
 
@@ -28,11 +28,7 @@ interface GeminiResponse {
   promptFeedback?: { blockReason?: string };
 }
 
-export async function generateRewriteCandidatesGemini(
-  text: string,
-  numVariants = 2,
-  charLimit = 280
-): Promise<string[]> {
+async function callGeminiForVariants(prompt: string, numVariants: number): Promise<string[]> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new GeminiError("GEMINI_API_KEY not configured");
@@ -50,7 +46,7 @@ export async function generateRewriteCandidatesGemini(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: buildRewritePrompt(text, numVariants, charLimit) }] }],
+          contents: [{ parts: [{ text: prompt }] }],
           generationConfig: { temperature: 0.8, maxOutputTokens: MAX_OUTPUT_TOKENS },
         }),
         signal: controller.signal,
@@ -77,4 +73,20 @@ export async function generateRewriteCandidatesGemini(
 
   const raw = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
   return parseVariants(raw, numVariants);
+}
+
+export async function generateRewriteCandidatesGemini(
+  text: string,
+  numVariants = 2,
+  charLimit = 280
+): Promise<string[]> {
+  return callGeminiForVariants(buildRewritePrompt(text, numVariants, charLimit), numVariants);
+}
+
+export async function generatePostsFromContextGemini(
+  context: string,
+  numVariants = 3,
+  charLimit = 280
+): Promise<string[]> {
+  return callGeminiForVariants(buildGeneratePrompt(context, numVariants, charLimit), numVariants);
 }

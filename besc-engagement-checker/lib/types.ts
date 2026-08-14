@@ -116,6 +116,28 @@ export interface AICandidate {
 
 export type AIStatus = "disabled" | "error" | "no_improvement" | "found";
 
+/** Same contextual fields as AnalyzeRequest, but a loose idea instead of finished text. */
+export interface GenerateRequest {
+  context: string;
+  mediaType: MediaType;
+  link: string;
+  isReply: boolean;
+  hasMutualFollowAudience: boolean;
+  recentPostsCount: number;
+  nsfw: boolean;
+  authorFollowers?: number;
+  postedHoursAgo?: number;
+  isVerified?: boolean;
+}
+
+export type GenerateStatus = "disabled" | "error" | "empty" | "found";
+
+export interface GenerateResult {
+  generateStatus: GenerateStatus;
+  /** Each candidate is already the deterministic-optimizer's polished version of what the model wrote, sorted by score descending. */
+  candidates?: AICandidate[];
+}
+
 export interface OptimizeResult {
   originalText: string;
   optimizedText: string;

@@ -24,6 +24,8 @@ import {
 import type {
   AnalyzeRequest,
   AuthorLookupResult,
+  GenerateRequest,
+  GenerateResult,
   MediaType,
   OptimizeResult,
   ScoreResult,
@@ -174,6 +176,61 @@ export default function Composer({
     }
   }
 
+  const [showGenerate, setShowGenerate] = useState(false);
+  const [contextIdea, setContextIdea] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [generateResult, setGenerateResult] = useState<GenerateResult | null>(null);
+
+  async function generateFromContext() {
+    if (!contextIdea.trim() || generating) return;
+    setGenerating(true);
+    setGenerateError(null);
+    setGenerateResult(null);
+    try {
+      const payload: GenerateRequest = {
+        context: contextIdea,
+        mediaType,
+        link,
+        isReply,
+        hasMutualFollowAudience,
+        recentPostsCount,
+        nsfw,
+        authorFollowers: parsedFollowers(),
+        postedHoursAgo,
+        isVerified,
+      };
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 115000);
+      let res: Response;
+      try {
+        res = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Generate failed");
+      setGenerateResult(data as GenerateResult);
+    } catch (e) {
+      const err = e as Error;
+      setGenerateError(err.name === "AbortError" ? "Generate timed out. Try again." : err.message);
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  function useGeneratedCandidate(candidateText: string) {
+    applyText(candidateText);
+    setGenerateResult(null);
+    setContextIdea("");
+    setShowGenerate(false);
+  }
+
   function applyText(newText: string) {
     setText(newText);
     setOptimizeResult(null);
@@ -291,6 +348,83 @@ export default function Composer({
         >
           {chars.toLocaleString()}/{charLimit.toLocaleString()}
         </span>
+      </div>
+
+      <div className="mb-4">
+        <button
+          type="button"
+          onClick={() => setShowGenerate((s) => !s)}
+          className="flex items-center gap-1.5 text-xs font-medium text-besc-300 transition-colors hover:text-besc-200"
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          {showGenerate ? "Hide idea generator" : "Don't have a draft? Generate one from an idea"}
+        </button>
+
+        {showGenerate && (
+          <div className="mt-2.5 rounded-2xl border border-besc-400/30 bg-besc-500/[0.06] p-3.5">
+            <textarea
+              value={contextIdea}
+              onChange={(e) => setContextIdea(e.target.value)}
+              placeholder="What do you want to post about? Rough notes are fine — e.g. &quot;shipped dark mode, users have been asking for months&quot;"
+              rows={2}
+              className="w-full resize-none rounded-xl border border-white/10 bg-black/30 p-3 text-sm text-white/85 placeholder:text-white/25 focus:border-besc-400/50 focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={generateFromContext}
+              disabled={!contextIdea.trim() || generating}
+              className="mt-2.5 flex items-center gap-1.5 rounded-full bg-besc-500 px-3.5 py-1.5 text-xs font-semibold text-black transition-colors hover:bg-besc-400 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {generating ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5" />
+              )}
+              Generate tweet
+            </button>
+            {generateError && <p className="mt-2 text-xs text-danger">{generateError}</p>}
+
+            {generateResult?.generateStatus === "disabled" && (
+              <p className="mt-2.5 text-[11px] text-white/35">
+                AI generation is off. Neither Gemini nor Ollama is configured for this deployment.
+              </p>
+            )}
+            {generateResult?.generateStatus === "error" && (
+              <p className="mt-2.5 text-xs text-danger">Generation failed to respond. Try again in a moment.</p>
+            )}
+            {generateResult?.generateStatus === "empty" && (
+              <p className="mt-2.5 text-[11px] text-white/35">
+                Didn't get a usable post back from that context. Try adding a bit more detail.
+              </p>
+            )}
+            {generateResult?.generateStatus === "found" && generateResult.candidates && (
+              <div className="mt-2.5 space-y-2.5">
+                <p className="text-[11px] leading-relaxed text-warn/80">
+                  Fully AI-written from your notes, not a rewrite of your own words — there's no
+                  ground truth here to check it against. Read every option before using it: verify
+                  every name, number, and claim yourself.
+                </p>
+                {generateResult.candidates.map((candidate, i) => (
+                  <div key={i} className="rounded-xl border border-white/10 bg-black/25 p-3">
+                    <div className="mb-1.5 flex items-center justify-between">
+                      <span className="font-mono text-xs font-semibold tabular-nums text-besc-300">
+                        {candidate.score.toFixed(1)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => useGeneratedCandidate(candidate.text)}
+                        className="flex items-center gap-1 rounded-full bg-besc-500 px-3 py-1 text-[11px] font-semibold text-black transition-colors hover:bg-besc-400"
+                      >
+                        <Check className="h-3 w-3" /> Use this draft
+                      </button>
+                    </div>
+                    <p className="text-[13px] leading-relaxed text-white/70">{candidate.text}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="mb-4 flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-3.5 py-2.5">

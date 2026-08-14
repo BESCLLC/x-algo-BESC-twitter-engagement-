@@ -1,4 +1,4 @@
-import { buildRewritePrompt, parseVariants } from "./aiPrompt";
+import { buildGeneratePrompt, buildRewritePrompt, parseVariants } from "./aiPrompt";
 
 export class OllamaError extends Error {}
 
@@ -75,11 +75,7 @@ async function checkOllamaHealth(url: string, model: string): Promise<void> {
   }
 }
 
-export async function generateRewriteCandidates(
-  text: string,
-  numVariants = 2,
-  charLimit = 280
-): Promise<string[]> {
+async function callOllamaForVariants(prompt: string, numVariants: number): Promise<string[]> {
   const url = process.env.OLLAMA_URL;
   const model = process.env.OLLAMA_MODEL;
   if (!url || !model) {
@@ -98,7 +94,7 @@ export async function generateRewriteCandidates(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model,
-        prompt: buildRewritePrompt(text, numVariants, charLimit),
+        prompt,
         stream: false,
         options: { temperature: 0.8, num_predict: MAX_OUTPUT_TOKENS, num_thread: NUM_THREAD },
       }),
@@ -120,4 +116,20 @@ export async function generateRewriteCandidates(
 
   const data = (await res.json()) as { response?: string };
   return parseVariants(data.response ?? "", numVariants);
+}
+
+export async function generateRewriteCandidates(
+  text: string,
+  numVariants = 2,
+  charLimit = 280
+): Promise<string[]> {
+  return callOllamaForVariants(buildRewritePrompt(text, numVariants, charLimit), numVariants);
+}
+
+export async function generatePostsFromContext(
+  context: string,
+  numVariants = 3,
+  charLimit = 280
+): Promise<string[]> {
+  return callOllamaForVariants(buildGeneratePrompt(context, numVariants, charLimit), numVariants);
 }

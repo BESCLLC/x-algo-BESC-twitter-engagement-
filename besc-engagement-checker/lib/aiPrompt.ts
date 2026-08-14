@@ -21,6 +21,31 @@ ${text}
 Write ${numVariants} tighter rewrites of this SAME post, same voice and facts, each ending with a hook relevant to this content. Output only lines starting "VARIANT: ", nothing else.`;
 }
 
+// Generation from scratch is a materially different risk than rewriting: a
+// rewrite has the user's own words as ground truth to preserve, but loose
+// context gives the model room to invent specifics that sound plausible.
+// The "only use facts... never invent specifics" instruction is the whole
+// defense against that — kept explicit and separate from the rewrite
+// prompt's "preserve every claim exactly" framing, which doesn't apply here.
+export function buildGeneratePrompt(context: string, numVariants: number, charLimit: number): string {
+  const boilerplateSample = BOILERPLATE_PHRASES.slice(0, 3).join('", "');
+  return `Write an original X post from scratch based on the context below, optimized to score high on a weighted-action ranking algorithm. Weights (weight x probability, summed):
++${WEIGHTS.shareViaCopyLink} share-via-copy-link (highest weight; needs a concrete hook/stat/story, not vague)
++${WEIGHTS.reply}/+${WEIGHTS.reply + WEIGHTS.bidirectionalReplyBoost} reply (end with a specific question fitting THIS content, not generic "thoughts?")
++${WEIGHTS.quote} quote, +${WEIGHTS.shareViaDm} DM-share, +${WEIGHTS.followAuthor} follow, +${WEIGHTS.share} share, +${WEIGHTS.retweet} repost, +${WEIGHTS.favorite} like (lowest, don't chase)
+${WEIGHTS.report} report, ${WEIGHTS.muteAuthor} mute, ${WEIGHTS.notInterested} not-interested, ${WEIGHTS.blockAuthor} block: triggered by ALL-CAPS, !!!/???, >2 hashtags, boilerplate like "${boilerplateSample}", shortened links.
+Avoid filler words (very/just/actually/I think) and passive voice; open with the point, not a wind-up. Max ${charLimit.toLocaleString()} chars.
+
+CRITICAL: Only use facts, names, and numbers that appear in the context below. Never invent specifics (stats, dates, names, outcomes) that aren't there — if the context is vague on a detail, write around it in general terms instead of making something up to sound concrete.
+
+Context from the user (a rough idea, not finished text):
+"""
+${context}
+"""
+
+Write ${numVariants} different complete post options based on this context, each a full standalone post, each ending with a hook relevant to this content. Output only lines starting "VARIANT: ", nothing else.`;
+}
+
 export function parseVariants(raw: string, max: number): string[] {
   return raw
     .split("\n")
