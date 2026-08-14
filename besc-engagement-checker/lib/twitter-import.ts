@@ -43,6 +43,14 @@ function firstExternalLink(raw: Raw): string {
   return pick<string>(urls[0], ["expanded_url", "url"], "");
 }
 
+function hoursSincePosted(raw: Raw): number {
+  const createdAt = pick<string>(raw, ["created_at", "createdAt", "timestamp"], "");
+  if (!createdAt) return 0;
+  const ts = new Date(createdAt).getTime();
+  if (Number.isNaN(ts)) return 0;
+  return Math.max(0, (Date.now() - ts) / (60 * 60 * 1000));
+}
+
 async function countRecentPosts(authorHandle: string, authorRestId: string): Promise<number> {
   if (!authorHandle && !authorRestId) return 0;
   try {
@@ -89,6 +97,7 @@ export async function importTweet(url: string): Promise<TweetImportResult> {
     authorFollowers: Number(pick<number>(author, ["followers_count", "followers"], 0)) || 0,
     authorVerified: Boolean(pick<boolean>(author, ["is_blue_verified", "verified"], false)),
     recentPostsCount,
+    postedHoursAgo: hoursSincePosted(raw),
     realMetrics: {
       likes: Number(pick<number>(raw, ["like_count", "favorite_count", "public_metrics.like_count"], 0)) || 0,
       retweets: Number(pick<number>(raw, ["retweet_count", "public_metrics.retweet_count"], 0)) || 0,

@@ -7,6 +7,10 @@ export interface AnalyzeRequest {
   isReplyToMutual: boolean;
   recentPostsCount: number;
   nsfw: boolean;
+  /** Your follower count, if known — drives the cold-start boost check. Omit if unknown. */
+  authorFollowers?: number;
+  /** Hours since this post went live. Omit/0 for a not-yet-posted draft (posting now). */
+  postedHoursAgo?: number;
 }
 
 export interface ActionRow {
@@ -65,6 +69,7 @@ export interface TweetImportResult {
   authorFollowers: number;
   authorVerified: boolean;
   recentPostsCount: number;
+  postedHoursAgo: number;
   realMetrics: {
     likes: number;
     retweets: number;

@@ -45,6 +45,11 @@ export const AUTHOR_DIVERSITY_FLOOR = 0.25; // params::AuthorDiversityFloor
 // home-mixer/params/param.rs — OonWeightFactor
 export const OON_WEIGHT_FACTOR = 0.75;
 
+// home-mixer/params/param.rs — ColdStartFollowerCap / ColdStartMaxPostAgeSecs / LowImpressionsMaxPositionRatio
+export const COLD_START_FOLLOWER_CAP = 1000;
+export const COLD_START_MAX_AGE_HOURS = 24; // 86400 secs
+export const COLD_START_MAX_POSITION_RATIO = 0.85;
+
 export function authorDiversityMultiplier(k: number): number {
   return (
     (1 - AUTHOR_DIVERSITY_FLOOR) * Math.pow(AUTHOR_DIVERSITY_DECAY, k) +
@@ -480,10 +485,10 @@ function buildRisks(f: FeatureReport, req: AnalyzeRequest): RiskFlag[] {
       severity: "critical",
       title: "Link may resolve to a low-quality / BAD URL verdict",
       detail: f.urlReason
-        ? f.urlReason
+        ? `${f.urlReason} A "LOW_QUALITY" verdict gets downranked — but if re-crawling turns up an actual "UNSAFE" verdict, the consequence is categorically worse: visibility-filtering applies MALICIOUS_URL_DROP/DO_NOT_AMPLIFY_DROP, which is a hard non-distribution drop for every non-author viewer, not a downrank.`
         : "No risky link pattern detected in this draft.",
       source:
-        "botmaker-rules/scarecrow/bot/Tweet_Spam_High_Recall_RTF_All_Bad_URL_Sources.bot, LQ_Tweets_With_LQ_URL_Verdict_At_Mention_To_NonFollower_v2.bot",
+        "botmaker-rules/scarecrow/bot/Tweet_Spam_High_Recall_RTF_All_Bad_URL_Sources.bot, LQ_Tweets_With_LQ_URL_Verdict_At_Mention_To_NonFollower_v2.bot, rtf_tweets_on_unsafe_verdict.bot (id 20790); visibility-filtering/rules/tweet_label_drops.rs:113-124",
       triggered: f.urlRisk,
     },
     {
@@ -501,9 +506,9 @@ function buildRisks(f: FeatureReport, req: AnalyzeRequest): RiskFlag[] {
       severity: "warning",
       title: "Reads like templated / copy-paste boilerplate",
       detail:
-        'Phrases like "follow for follow", "link in bio", or "RT if you agree" match the kind of generic, repeated-across-many-posts text that duplicate-text spam detection is built to catch.',
+        'Phrases like "follow for follow", "link in bio", or "RT if you agree" match the kind of generic, repeated-across-many-posts text that duplicate-text spam detection is built to catch — the same COPYPASTA_SPAM detection runs on reply text too, unigram- and CJK-character-matched, not just original posts.',
       source:
-        "botmaker-rules/scarecrow/bot/BBQDuplicateTextProd.bot (id 21711, COPYPASTA_SPAM label) — heuristic proxy, not a literal duplicate-corpus match",
+        "botmaker-rules/scarecrow/bot/BBQDuplicateTextProd.bot (id 21711), BBQDuplicateTextRepliesProd.bot (id 21599) — heuristic proxy, not a literal duplicate-corpus match",
       triggered: f.hasBoilerplateCTA,
     },
     {
@@ -535,6 +540,15 @@ function buildRisks(f: FeatureReport, req: AnalyzeRequest): RiskFlag[] {
       triggered: req.nsfw,
     },
     {
+      id: "nsfw-account-label",
+      severity: "warning",
+      title: "Repeated NSFW posts can trip an account-level label",
+      detail:
+        "This goes beyond a single post's interstitial: if roughly 3 of your last 5 posts (within 60 days) carry an NSFW_HIGH_PRECISION flag, your whole account gets a 7-day NSFW_HIGH_PRECISION label; an unbroken streak of flagged posts can escalate further to a POSSIBLY_NSFW_ACCOUNT label.",
+      source: "safety-label-user-agg/postToUserLabelRules.strato:360-428",
+      triggered: req.nsfw && req.recentPostsCount >= 2,
+    },
+    {
       id: "repeat-posting",
       severity: "info",
       title: "Repeat posting in the same window compresses reach",
@@ -557,6 +571,31 @@ function buildRisks(f: FeatureReport, req: AnalyzeRequest): RiskFlag[] {
       triggered: true,
     },
   ];
+
+  if (req.authorFollowers !== undefined) {
+    const ageHours = req.postedHoursAgo ?? 0;
+    const eligible =
+      req.authorFollowers <= COLD_START_FOLLOWER_CAP && ageHours <= COLD_START_MAX_AGE_HOURS;
+    risks.push({
+      id: "cold-start-boost",
+      severity: "info",
+      title: eligible ? "Cold-start boost likely applies" : "Cold-start boost doesn't apply here",
+      detail: eligible
+        ? `With ${req.authorFollowers.toLocaleString()} followers (≤ ${COLD_START_FOLLOWER_CAP.toLocaleString()} cap) and posted ${
+            ageHours < 1 ? "just now" : `${ageHours.toFixed(0)}h ago`
+          } (≤ ${COLD_START_MAX_AGE_HOURS}h window), this post is eligible to be force-boosted into a top slot for some viewers — within the top ${(
+            COLD_START_MAX_POSITION_RATIO * 100
+          ).toFixed(
+            0
+          )}% of ranked positions — bypassing the normal weighted-score ranking entirely. This is separate from, and on top of, the BESC Score above.`
+        : `Cold-start force-boosting only kicks in under ${COLD_START_FOLLOWER_CAP.toLocaleString()} followers and within a ${COLD_START_MAX_AGE_HOURS}h posting window — at ${req.authorFollowers.toLocaleString()} followers${
+            ageHours > COLD_START_MAX_AGE_HOURS ? ` and ${ageHours.toFixed(0)}h old` : ""
+          }, this post doesn't currently qualify.`,
+      source:
+        "home-mixer/scorers/author_cold_start.rs:86-91,156-192; home-mixer/params/param.rs:638-655 (ColdStartFollowerCap=1000, ColdStartMaxPostAgeSecs=86400, LowImpressionsMaxPositionRatio=0.85)",
+      triggered: eligible,
+    });
+  }
 
   return risks;
 }

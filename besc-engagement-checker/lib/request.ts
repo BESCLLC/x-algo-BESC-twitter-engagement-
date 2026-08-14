@@ -12,6 +12,15 @@ export function parseAnalyzeRequest(body: Partial<AnalyzeRequest>): AnalyzeReque
     : "none";
   const link = typeof body.link === "string" ? body.link.slice(0, 500) : "";
 
+  const authorFollowers =
+    body.authorFollowers !== undefined && body.authorFollowers !== null
+      ? Math.max(0, Number(body.authorFollowers) || 0)
+      : undefined;
+  const postedHoursAgo =
+    body.postedHoursAgo !== undefined && body.postedHoursAgo !== null
+      ? Math.max(0, Number(body.postedHoursAgo) || 0)
+      : undefined;
+
   return {
     text,
     mediaType,
@@ -19,5 +28,7 @@ export function parseAnalyzeRequest(body: Partial<AnalyzeRequest>): AnalyzeReque
     isReplyToMutual: Boolean(body.isReplyToMutual),
     recentPostsCount: Math.max(0, Math.min(10, Number(body.recentPostsCount) || 0)),
     nsfw: Boolean(body.nsfw),
+    authorFollowers,
+    postedHoursAgo,
   };
 }

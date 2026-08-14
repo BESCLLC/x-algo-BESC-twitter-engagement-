@@ -14,6 +14,7 @@ import {
   Wand2,
   Check,
   X,
+  Rocket,
 } from "lucide-react";
 import type {
   AnalyzeRequest,
@@ -49,8 +50,16 @@ export default function Composer({
   const [isReplyToMutual, setIsReplyToMutual] = useState(false);
   const [nsfw, setNsfw] = useState(false);
   const [recentPostsCount, setRecentPostsCount] = useState(0);
+  const [authorFollowers, setAuthorFollowers] = useState("");
+  const [postedHoursAgo, setPostedHoursAgo] = useState(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
+
+  function parsedFollowers(): number | undefined {
+    if (!authorFollowers.trim()) return undefined;
+    const n = Number(authorFollowers);
+    return Number.isFinite(n) && n >= 0 ? n : undefined;
+  }
 
   const [importUrl, setImportUrl] = useState("");
   const [importing, setImporting] = useState(false);
@@ -73,6 +82,8 @@ export default function Composer({
         isReplyToMutual,
         recentPostsCount,
         nsfw,
+        authorFollowers: parsedFollowers(),
+        postedHoursAgo,
       };
       const res = await fetch("/api/optimize", {
         method: "POST",
@@ -114,6 +125,8 @@ export default function Composer({
       setMediaType(imported.mediaType);
       setLink(imported.link);
       setRecentPostsCount(imported.recentPostsCount);
+      setAuthorFollowers(String(imported.authorFollowers));
+      setPostedHoursAgo(imported.postedHoursAgo);
       onImport?.(imported);
     } catch (e) {
       setImportError((e as Error).message);
@@ -139,6 +152,8 @@ export default function Composer({
         isReplyToMutual,
         recentPostsCount,
         nsfw,
+        authorFollowers: parsedFollowers(),
+        postedHoursAgo,
       };
       const res = await fetch("/api/analyze", {
         method: "POST",
@@ -165,7 +180,7 @@ export default function Composer({
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text, mediaType, link, isReplyToMutual, nsfw, recentPostsCount]);
+  }, [text, mediaType, link, isReplyToMutual, nsfw, recentPostsCount, authorFollowers, postedHoursAgo]);
 
   const chars = text.length;
   const overLimit = chars > CHAR_LIMIT;
@@ -210,6 +225,7 @@ export default function Composer({
           setText(e.target.value);
           onImport?.(null);
           setOptimizeResult(null);
+          setPostedHoursAgo(0);
         }}
         placeholder="What's happening?"
         rows={5}
@@ -274,6 +290,19 @@ export default function Composer({
             className="h-4 w-4 accent-besc-500"
           />
         </label>
+      </div>
+
+      <div className="mt-4 flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-3.5 py-2.5">
+        <Rocket className="h-4 w-4 shrink-0 text-white/30" />
+        <input
+          type="number"
+          min={0}
+          inputMode="numeric"
+          value={authorFollowers}
+          onChange={(e) => setAuthorFollowers(e.target.value)}
+          placeholder="Your follower count (optional — unlocks the cold-start boost check)"
+          className="w-full bg-transparent text-sm text-white/80 placeholder:text-white/25 focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        />
       </div>
 
       <div className="mt-4 flex items-center justify-between rounded-2xl border border-white/10 bg-black/20 px-3.5 py-2.5">
