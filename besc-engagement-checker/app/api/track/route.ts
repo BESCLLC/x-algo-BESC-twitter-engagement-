@@ -5,6 +5,7 @@ import {
   buildTrackSummary,
   deleteTrackedPost,
   listTrackedPosts,
+  loadBacktest,
   loadTimingInsights,
   saveTrackedPost,
 } from "@/lib/tracking";
@@ -38,11 +39,18 @@ export async function GET(req: NextRequest) {
     // Browser-style offset, so hour-of-day buckets land in the author's local
     // time — "post in the morning" is only actionable where they actually live.
     const tzOffset = Number(req.nextUrl.searchParams.get("tz")) || 0;
-    const [posts, timing] = await Promise.all([
+    const [posts, timing, accuracy] = await Promise.all([
       listTrackedPosts(handle),
       loadTimingInsights(handle, tzOffset),
+      loadBacktest(handle),
     ]);
-    return NextResponse.json({ enabled: true, posts, summary: buildTrackSummary(posts), timing });
+    return NextResponse.json({
+      enabled: true,
+      posts,
+      summary: buildTrackSummary(posts),
+      timing,
+      accuracy,
+    });
   } catch (err) {
     console.error("[track] list failed:", err instanceof Error ? err.message : err);
     return NextResponse.json({ error: "Couldn't load your tracked posts." }, { status: 500 });
@@ -107,11 +115,18 @@ export async function DELETE(req: NextRequest) {
     // Browser-style offset, so hour-of-day buckets land in the author's local
     // time — "post in the morning" is only actionable where they actually live.
     const tzOffset = Number(req.nextUrl.searchParams.get("tz")) || 0;
-    const [posts, timing] = await Promise.all([
+    const [posts, timing, accuracy] = await Promise.all([
       listTrackedPosts(handle),
       loadTimingInsights(handle, tzOffset),
+      loadBacktest(handle),
     ]);
-    return NextResponse.json({ enabled: true, posts, summary: buildTrackSummary(posts), timing });
+    return NextResponse.json({
+      enabled: true,
+      posts,
+      summary: buildTrackSummary(posts),
+      timing,
+      accuracy,
+    });
   } catch (err) {
     console.error("[track] delete failed:", err instanceof Error ? err.message : err);
     return NextResponse.json({ error: "Couldn't remove that tracked post." }, { status: 500 });

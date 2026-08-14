@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import type { CalibrationSide, TrackRecord, TrackSummary, TrackedPost } from "@/lib/types";
 import type { TimingInsights } from "@/lib/timing";
+import type { BacktestResult } from "@/lib/backtest";
 
 function compact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -30,7 +31,7 @@ export default function TrackRecordPanel({
   handle: string;
   onHandleChange?: (h: string) => void;
 }) {
-  const [record, setRecord] = useState<(TrackRecord & { enabled: boolean; timing?: TimingInsights }) | null>(null);
+  const [record, setRecord] = useState<(TrackRecord & { enabled: boolean; timing?: TimingInsights; accuracy?: BacktestResult }) | null>(null);
   const [showPosts, setShowPosts] = useState(false);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -232,6 +233,7 @@ export default function TrackRecordPanel({
         </p>
       )}
 
+      {record?.accuracy && <Accuracy accuracy={record.accuracy} />}
       {summary && <Summary summary={summary} />}
       {record?.timing && <Timing timing={record.timing} />}
 
@@ -263,6 +265,71 @@ export default function TrackRecordPanel({
           )}
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * The tool grading itself. Deliberately the first thing in the panel: if the
+ * score doesn't predict this author's outcomes, that changes how much weight
+ * everything below it deserves, and burying it would be self-serving.
+ */
+function Accuracy({ accuracy }: { accuracy: BacktestResult }) {
+  if (accuracy.verdict === "insufficient") {
+    return (
+      <div className="mt-4 rounded-xl border border-white/10 bg-black/25 p-3.5">
+        <p className="text-xs font-semibold text-white/70">Is this score any good?</p>
+        <p className="mt-1.5 text-[12.5px] leading-relaxed text-white/45">
+          Needs {accuracy.minimumForVerdict - accuracy.n} more published posts with real numbers
+          before that can be answered honestly.
+        </p>
+      </div>
+    );
+  }
+
+  const r = Math.max(accuracy.viewsCorrelation ?? -1, accuracy.engagementRateCorrelation ?? -1);
+  const tone =
+    accuracy.verdict === "predictive"
+      ? "border-besc-400/35 bg-besc-500/[0.08]"
+      : accuracy.verdict === "inverted"
+        ? "border-danger/35 bg-danger/[0.06]"
+        : "border-white/10 bg-black/25";
+
+  const headline = {
+    predictive: "The score is predicting your reach",
+    weak: "The score has a weak but real signal",
+    none: "The score is not predicting your reach",
+    inverted: "The score is currently backwards for you",
+    insufficient: "",
+  }[accuracy.verdict];
+
+  const detail = {
+    predictive:
+      "Higher-scoring drafts really do land better for your account. Worth optimising toward.",
+    weak: "There's a real but small relationship. Treat it as a nudge, not a rule.",
+    none: "Across your history, higher-scoring posts do not get more reach. The wording levers this tool measures aren't what's driving your numbers — which is worth knowing before you spend effort on them.",
+    inverted:
+      "Higher-scoring posts are doing worse, consistently. Something the scorer rewards is being penalised by your actual audience.",
+    insufficient: "",
+  }[accuracy.verdict];
+
+  return (
+    <div className={`mt-4 rounded-xl border p-3.5 ${tone}`}>
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="text-xs font-semibold text-white/80">{headline}</p>
+        <span className="shrink-0 font-mono text-[11px] tabular-nums text-white/40">
+          r={r.toFixed(2)} · n={accuracy.n}
+        </span>
+      </div>
+      <p className="mt-1.5 text-[12.5px] leading-relaxed text-white/50">{detail}</p>
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-white/35">
+        <span>vs views: {accuracy.viewsCorrelation?.toFixed(2) ?? "—"}</span>
+        <span>vs engagement rate: {accuracy.engagementRateCorrelation?.toFixed(2) ?? "—"}</span>
+      </div>
+      <p className="mt-2 text-[11px] leading-relaxed text-white/30">
+        Rank correlation over every post measured, because the score's job is ordering drafts
+        rather than forecasting a view count.
+      </p>
     </div>
   );
 }

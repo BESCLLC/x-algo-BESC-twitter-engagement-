@@ -3,6 +3,7 @@ import { fetchTweetMetrics, fetchUserTimeline, type TimelinePost } from "./twitt
 import { findBestMatch } from "./textMatch";
 import { optimizerRuleLabels } from "./optimize";
 import { buildTimingInsights, type TimingInsights, type TimingSample } from "./timing";
+import { backtest, type BacktestResult } from "./backtest";
 import type {
   CalibrationSide,
   FixInsight,
@@ -234,6 +235,38 @@ export async function loadTimingInsights(
     .filter((r) => r.posted_at)
     .map((r) => ({ postedAt: r.posted_at!.toISOString(), views: num(r.views) }));
   return buildTimingInsights(samples, tzOffsetMinutes);
+}
+
+/**
+ * Grades the scorer against everything this author has actually published.
+ * Uses the full history rather than the 100-post page, since rank correlation
+ * on a truncated sample would answer a different question than the one asked.
+ */
+export async function loadBacktest(handle: string): Promise<BacktestResult> {
+  const rows = await query<{
+    predicted_score: number;
+    views: string | number | null;
+    likes: string | number | null;
+    retweets: string | number | null;
+    replies: string | number | null;
+    quotes: string | number | null;
+    bookmarks: string | number | null;
+  }>(
+    `SELECT predicted_score, views, likes, retweets, replies, quotes, bookmarks
+     FROM tracked_posts
+     WHERE author_handle = $1 AND views > 0 AND is_reply = FALSE
+     ORDER BY created_at DESC LIMIT 2000`,
+    [handle.toLowerCase()]
+  );
+
+  return backtest(
+    rows.map((r) => ({
+      predicted: Number(r.predicted_score),
+      views: num(r.views),
+      engagements:
+        num(r.likes) + num(r.replies) + num(r.retweets) + num(r.quotes) + num(r.bookmarks),
+    }))
+  );
 }
 
 export function engagementsOf(m: TrackedPostMetrics): number {
