@@ -7,10 +7,13 @@
 FROM ollama/ollama:latest
 
 # Override with a Railway build arg if you want a different model.
-# qwen2.5:7b-instruct: chosen over the larger 14b variant after repeated
-# real-world timeouts on CPU-only inference — same weight-aware prompt,
-# roughly 2x the tokens/sec, reliably finishes within a web request.
-ARG MODEL=qwen2.5:7b-instruct
+# llama3.2:3b: dropped down from 7b after THAT also hit the same 100s
+# timeout wall, three times in a row, with the health check confirming
+# connectivity/model-loading were never the problem. This is a diagnostic
+# step as much as a fix — if 3b still times out, the bottleneck is this
+# service's actual CPU allocation, not model size, and no amount of
+# further downsizing will fix it.
+ARG MODEL=llama3.2:3b
 ENV MODEL_NAME=${MODEL}
 ENV OLLAMA_HOST=0.0.0.0:11434
 
