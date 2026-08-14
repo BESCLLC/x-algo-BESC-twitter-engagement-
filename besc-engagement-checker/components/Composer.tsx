@@ -162,7 +162,7 @@ export default function Composer({
         res = await fetch("/api/optimize", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          body: JSON.stringify({ ...payload, handle: handleInput.trim() }),
           signal: controller.signal,
         });
       } finally {
@@ -219,7 +219,7 @@ export default function Composer({
         res = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          body: JSON.stringify({ ...payload, handle: handleInput.trim() }),
           signal: controller.signal,
         });
       } finally {
@@ -321,7 +321,9 @@ export default function Composer({
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        // handle is sent so scoring can use a model fitted to this author's
+        // own results when one exists; it's ignored otherwise.
+        body: JSON.stringify({ ...payload, handle: handleInput.trim() }),
         signal: controller.signal,
       });
       if (!res.ok) throw new Error("analyze failed");

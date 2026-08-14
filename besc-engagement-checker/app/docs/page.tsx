@@ -504,6 +504,46 @@ export default function Docs() {
               post, because a wrong attribution would quietly corrupt the very data this exists to
               build.
             </P>
+
+            <SubHead>Learning from your history</SubHead>
+            <P>
+              <strong>Learn from my history</strong> reads your published posts and their real
+              numbers in one go, rather than waiting for tracked drafts to accumulate. Views and
+              per-action counts are both public on a published post, so{" "}
+              <Mono>replies ÷ views</Mono> is a directly measured action rate — real ground truth,
+              not an estimate.
+            </P>
+            <P>
+              With enough of those, the guessed probabilities behind your score get replaced by
+              ones fitted to your own results, using ridge regression over the same features the
+              scorer already extracts. It&apos;s the same shape as what Phoenix does — predict a
+              probability per action, then blend with the real production weights — just learned
+              at the level of &quot;posts like this one&quot; rather than per individual viewer.
+            </P>
+            <Callout tone="info" title="Why it can't be Phoenix itself">
+              Phoenix takes a viewer, that viewer&apos;s engagement history, and a candidate post,
+              and predicts what <em>that specific person</em> will do. An unpublished draft has no
+              viewer, and no API exposes the private engagement history of everyone who might see
+              your post — so the model is out of reach by construction, not for lack of access. No
+              trained weights are published either; what ships is training code and synthetic data
+              generators. The aggregate question this tool asks — &quot;how will this post do?&quot;
+              — is a different and more tractable one.
+            </Callout>
+            <P>
+              Three guards keep it honest. Nothing is fitted below 40 posts. Every fitted action
+              must clear <strong>cross-validated</strong> R² before it&apos;s used at all, so a
+              model that merely memorised your history is rejected rather than shipped. And the
+              fit is blended with the original heuristics in proportion to how much data backs it
+              — 60 posts nudges the score, 500 largely drives it.
+            </P>
+            <P className="text-white/40">
+              What&apos;s learned is <em>relative</em>: &quot;this post should do about 1.8× your
+              typical reply rate&quot;, applied to the existing scale. Real reply rates are ~1% of
+              views while the priors sit near 0.4 — they were tuned to spread the 0–100 range
+              usefully, not to be literal probabilities. Substituting real magnitudes would drop
+              everyone&apos;s score by a dozen points and tell them nothing, so calibration
+              reorders drafts rather than rebasing the scale.
+            </P>
             <P className="text-white/40">
               Tracking needs a database to be attached to the deployment. Without one it reports
               itself as unavailable and everything else works exactly as before.

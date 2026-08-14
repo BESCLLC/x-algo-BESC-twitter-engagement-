@@ -226,4 +226,6 @@ export interface ScoreResult {
   features: FeatureReport;
   authorDiversityMultiplier: number;
   oonWeightFactor: number;
+  /** 0 = pure heuristic, →1 = score largely driven by a model fitted to this author's real results. */
+  calibrationStrength?: number;
 }

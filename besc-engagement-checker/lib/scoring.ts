@@ -7,6 +7,7 @@ import type {
   Tip,
 } from "./types";
 import { countFillerWords, passiveVoiceSentenceRatio, hasWeakOpener } from "./nlp";
+import { calibratedRate, calibratedRatio, featureVector, type CalibrationModel } from "./calibration";
 
 /**
  * ─────────────────────────────────────────────────────────────────────────
@@ -469,6 +470,47 @@ function estimateActionProbabilities(
     report,
     notDwelled,
   };
+}
+
+/**
+ * Replaces guessed action probabilities with ones fitted to this author's real
+ * outcomes, where a trustworthy fit exists. Only the four actions X actually
+ * reports counts for can be learned directly. The share family (copy-link, DM,
+ * generic share) is never exposed publicly, so it stays heuristic — but it's
+ * nudged by the author's observed bookmark rate, which is the closest
+ * observable proxy for "worth saving or sending to someone".
+ */
+function applyCalibration(
+  heuristic: ActionProbabilities,
+  features: FeatureReport,
+  req: AnalyzeRequest,
+  model?: CalibrationModel | null
+): ActionProbabilities {
+  if (!model) return heuristic;
+
+  const vector = featureVector(features, req.mediaType);
+  const out = { ...heuristic };
+
+  const favorite = calibratedRate(model, "favorite", vector, heuristic.favorite);
+  if (favorite !== null) out.favorite = favorite;
+  const reply = calibratedRate(model, "reply", vector, heuristic.reply);
+  if (reply !== null) out.reply = reply;
+  const retweet = calibratedRate(model, "retweet", vector, heuristic.retweet);
+  if (retweet !== null) out.retweet = retweet;
+  const quote = calibratedRate(model, "quote", vector, heuristic.quote);
+  if (quote !== null) out.quote = quote;
+
+  // Share-family actions are never exposed publicly, so they can't be learned
+  // directly. The author's bookmark rate is the closest observable proxy for
+  // "worth saving or sending to someone", so its learned ratio carries them.
+  const bookmarkRatio = calibratedRatio(model, "bookmark", vector);
+  if (bookmarkRatio !== null) {
+    out.shareViaCopyLink = clamp01(heuristic.shareViaCopyLink * bookmarkRatio);
+    out.shareViaDm = clamp01(heuristic.shareViaDm * bookmarkRatio);
+    out.share = clamp01(heuristic.share * bookmarkRatio);
+  }
+
+  return out;
 }
 
 function buildActionRows(
@@ -988,9 +1030,10 @@ function buildTips(f: FeatureReport, req: AnalyzeRequest, risks: RiskFlag[]): Ti
   return tips;
 }
 
-export function analyzePost(req: AnalyzeRequest): ScoreResult {
+export function analyzePost(req: AnalyzeRequest, calibration?: CalibrationModel | null): ScoreResult {
   const features = extractFeatures(req.text, req.link);
-  const probabilities = estimateActionProbabilities(features, req);
+  const heuristic = estimateActionProbabilities(features, req);
+  const probabilities = applyCalibration(heuristic, features, req, calibration);
   const actions = buildActionRows(probabilities, req);
 
   const positiveContribution = actions

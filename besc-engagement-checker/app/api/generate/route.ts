@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { optimizePost } from "@/lib/optimize";
 import { parseGenerateRequest } from "@/lib/request";
 import { getCharLimit } from "@/lib/scoring";
+import { loadCalibration } from "@/lib/calibrationStore";
+import { dbConfigured } from "@/lib/db";
 import { generatePostsFromContext, ollamaConfigured } from "@/lib/ollama";
 import { generatePostsFromContextGemini, geminiConfigured } from "@/lib/gemini";
 import type { AICandidate, AnalyzeRequest, GenerateRequest, GenerateStatus } from "@/lib/types";
 
 export async function POST(req: NextRequest) {
-  let body: Partial<GenerateRequest>;
+  let body: Partial<GenerateRequest> & { handle?: string };
   try {
     body = await req.json();
   } catch {
@@ -25,6 +27,10 @@ export async function POST(req: NextRequest) {
 
   try {
     const { context, ...contextFields } = parsed;
+    const calibration =
+      dbConfigured() && typeof body.handle === "string" && body.handle.trim()
+        ? await loadCalibration(body.handle)
+        : null;
     const charLimit = getCharLimit(parsed.isVerified);
 
     // Provider-specific defaults on purpose: Gemini (hosted, cheap) samples
@@ -41,7 +47,7 @@ export async function POST(req: NextRequest) {
     const scored: AICandidate[] = rawCandidates
       .map((text) => {
         const analyzeReq: AnalyzeRequest = { ...contextFields, text };
-        const optimized = optimizePost(analyzeReq);
+        const optimized = optimizePost(analyzeReq, calibration);
         return { text: optimized.optimizedText, score: optimized.after.score };
       })
       .sort((a, b) => b.score - a.score);

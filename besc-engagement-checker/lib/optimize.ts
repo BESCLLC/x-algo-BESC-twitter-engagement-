@@ -9,6 +9,7 @@ import {
 } from "./scoring";
 import { stripFillerWords } from "./nlp";
 import type { AnalyzeRequest, OptimizeResult, OptimizeStep } from "./types";
+import type { CalibrationModel } from "./calibration";
 
 function collapsePunctuationBursts(text: string): string {
   return text.replace(/[!?]{2,}/g, (m) => m[0]);
@@ -190,8 +191,9 @@ const MAX_PASSES = 3;
 // "fixed" once — e.g. "NOW!!! Link in bio ???" -> "NOW! ?" -> "NOW!?" after
 // the boilerplate phrase between them is removed. Rules are idempotent, so
 // re-running the whole list until nothing changes converges safely.
-export function optimizePost(req: AnalyzeRequest): OptimizeResult {
-  const before = analyzePost(req);
+export function optimizePost(req: AnalyzeRequest, calibration?: CalibrationModel | null): OptimizeResult {
+  const score = (r: AnalyzeRequest) => analyzePost(r, calibration);
+  const before = score(req);
   const RULES = buildRules(getHashtagWordSet(req.text), getCharLimit(req.isVerified));
   let current: AnalyzeRequest = { ...req };
   let currentScore = before;
@@ -212,7 +214,7 @@ export function optimizePost(req: AnalyzeRequest): OptimizeResult {
       if (nextText === current.text) continue;
 
       const candidate: AnalyzeRequest = { ...current, text: nextText };
-      const candidateScore = analyzePost(candidate);
+      const candidateScore = score(candidate);
 
       if (rule.forced || candidateScore.score >= currentScore.score) {
         if (rule.forced) anyForcedApplied = true;

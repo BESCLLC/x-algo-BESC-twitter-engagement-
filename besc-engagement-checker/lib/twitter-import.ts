@@ -152,20 +152,55 @@ export interface TimelinePost {
   tweetId: string;
   text: string;
   createdAt?: string;
+  /** Present on timeline entries, which are full tweet objects — this is what
+   * makes a published timeline usable as training data without waiting for
+   * drafts to be tracked one at a time. */
+  metrics?: TweetImportResult["realMetrics"];
+  mediaType?: MediaType;
+  isReply?: boolean;
+}
+
+function timelineEntryToPost(entry: Raw): TimelinePost {
+  return {
+    tweetId: String(pick<string | number>(entry, ["id_str", "id", "rest_id", "tweet_id"], "")),
+    text: pick<string>(entry, ["text", "full_text"], ""),
+    createdAt: pick<string>(entry, ["created_at", "createdAt"], "") || undefined,
+    metrics: extractMetrics(entry),
+    mediaType: detectMediaType(entry),
+    isReply: detectIsReply(entry),
+  };
 }
 
 /** Recent posts from a handle's profile, shaped for draft matching. */
-export async function fetchUserTimeline(handle: string): Promise<TimelinePost[]> {
-  const raw = await callVee3Tool<Raw>("x-twitter_user_timeline", { user_name: handle });
+export async function fetchUserTimeline(handle: string, cursor?: string): Promise<TimelinePost[]> {
+  const page = await fetchUserTimelinePage(handle, cursor);
+  return page.posts;
+}
+
+/**
+ * One page of a handle's timeline, plus the cursor for the next one. Kept
+ * separate from fetchUserTimeline so the draft-matching path can stay a
+ * single cheap call while backfill walks the whole history.
+ */
+export async function fetchUserTimelinePage(
+  handle: string,
+  cursor?: string
+): Promise<{ posts: TimelinePost[]; nextCursor?: string }> {
+  const args: Record<string, unknown> = { user_name: handle };
+  if (cursor) args.cursor = cursor;
+
+  const raw = await callVee3Tool<Raw>("x-twitter_user_timeline", args);
   const entries = pick<any[]>(raw, ["entries", "tweets", "timeline", "posts", "data"], []);
-  if (!Array.isArray(entries)) return [];
-  return entries
-    .map((entry) => ({
-      tweetId: String(pick<string | number>(entry, ["id_str", "id", "rest_id", "tweet_id"], "")),
-      text: pick<string>(entry, ["text", "full_text"], ""),
-      createdAt: pick<string>(entry, ["created_at", "createdAt"], "") || undefined,
-    }))
+  const nextCursor =
+    pick<string>(raw, ["next_cursor", "nextCursor", "cursor", "next"], "") || undefined;
+
+  if (!Array.isArray(entries)) return { posts: [], nextCursor: undefined };
+
+  const posts = entries
+    .map(timelineEntryToPost)
     .filter((t) => t.tweetId && t.tweetId !== "undefined" && t.text);
+
+  return { posts, nextCursor };
 }
 
 /** Fresh engagement numbers for one already-identified tweet. */

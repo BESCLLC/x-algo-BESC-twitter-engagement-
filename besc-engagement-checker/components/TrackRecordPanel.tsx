@@ -9,6 +9,7 @@ import {
   TrendingUp,
   Clock,
   CheckCircle2,
+  Brain,
 } from "lucide-react";
 import type { CalibrationSide, TrackRecord, TrackSummary, TrackedPost } from "@/lib/types";
 
@@ -24,6 +25,46 @@ export default function TrackRecordPanel({ handle }: { handle: string }) {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [syncNote, setSyncNote] = useState<string | null>(null);
+  const [learning, setLearning] = useState(false);
+  const [learnNote, setLearnNote] = useState<string | null>(null);
+
+  async function learnFromHistory() {
+    if (!handle.trim() || learning) return;
+    setLearning(true);
+    setError(null);
+    setLearnNote(null);
+    try {
+      const res = await fetch("/api/track/backfill", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ handle: handle.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Couldn't read your history");
+      if (data.enabled === false) throw new Error("Tracking isn't set up on this deployment yet.");
+
+      const c = data.calibration;
+      if (!c || c.n < c.minimumForFit) {
+        setLearnNote(
+          `Read ${data.fetched} posts (${data.usable} usable). Need at least ${c?.minimumForFit ?? 40} posts with view counts before the score can be fitted to your results — heuristics are still in use.`
+        );
+      } else if (!c.actions?.length) {
+        setLearnNote(
+          `Read ${data.fetched} posts. Nothing generalised out of sample, so the score stays on the heuristics rather than pretending to have learned something.`
+        );
+      } else {
+        const learned = c.actions.map((a: { action: string; cvR2: number }) => `${a.action} (R²${a.cvR2.toFixed(2)})`).join(", ");
+        setLearnNote(
+          `Learned from ${c.n} of your posts. Now predicting ${learned} from your own results — the score is ${Math.round(c.strength * 100)}% fitted, ${Math.round((1 - c.strength) * 100)}% heuristic.`
+        );
+      }
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLearning(false);
+    }
+  }
 
   const load = useCallback(async () => {
     if (!handle.trim()) {
@@ -120,6 +161,17 @@ export default function TrackRecordPanel({ handle }: { handle: string }) {
     <div className="glass-panel p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Header />
+        <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={learnFromHistory}
+          disabled={learning}
+          title="Read your published posts and their real numbers, then fit the score to your own results"
+          className="flex items-center gap-1.5 rounded-full border border-besc-400/40 bg-besc-500/10 px-3.5 py-1.5 text-xs font-medium text-besc-200 transition-colors hover:bg-besc-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {learning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Brain className="h-3.5 w-3.5" />}
+          {learning ? "Reading your history…" : "Learn from my history"}
+        </button>
         <button
           type="button"
           onClick={sync}
@@ -129,10 +181,16 @@ export default function TrackRecordPanel({ handle }: { handle: string }) {
           {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
           {syncing ? "Checking X…" : "Check for results"}
         </button>
+        </div>
       </div>
 
       {error && <p className="mt-3 text-xs text-danger">{error}</p>}
       {syncNote && !error && <p className="mt-3 text-xs text-white/40">{syncNote}</p>}
+      {learnNote && !error && (
+        <p className="mt-3 rounded-xl border border-besc-400/25 bg-besc-500/[0.06] p-3 text-[12.5px] leading-relaxed text-besc-100/80">
+          {learnNote}
+        </p>
+      )}
 
       {summary && <Summary summary={summary} />}
 

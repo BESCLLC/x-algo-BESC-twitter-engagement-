@@ -60,7 +60,21 @@ CREATE TABLE IF NOT EXISTS tracked_posts (
   quotes            BIGINT,
   bookmarks         BIGINT
 );
+-- Added after the table shipped, so it needs an ALTER: CREATE TABLE IF NOT
+-- EXISTS won't touch an existing table. Distinguishes drafts the user tracked
+-- by hand from posts backfilled out of their published timeline.
+ALTER TABLE tracked_posts ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'tracked';
+
 CREATE INDEX IF NOT EXISTS tracked_posts_handle_idx ON tracked_posts (author_handle, created_at DESC);
+
+-- One fitted model per handle, refreshed after a backfill or sync. Cached
+-- here rather than refitted per request: fitting walks every post the handle
+-- has, which is far too much work for a keystroke-latency scoring call.
+CREATE TABLE IF NOT EXISTS calibration_models (
+  handle    TEXT PRIMARY KEY,
+  model     JSONB       NOT NULL,
+  fitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 -- Partial unique index, not a plain one: many rows legitimately sit with a
 -- NULL tweet_id (drafts saved but not yet published), and those must not
 -- collide with each other — but one published tweet must never be claimed
