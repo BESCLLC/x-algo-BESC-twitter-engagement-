@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { optimizePost } from "@/lib/optimize";
 import { parseAnalyzeRequest } from "@/lib/request";
-import { analyzePost } from "@/lib/scoring";
+import { analyzePost, getCharLimit } from "@/lib/scoring";
 import { generateRewriteCandidates, ollamaConfigured } from "@/lib/ollama";
 import type { AICandidate, AIStatus, AnalyzeRequest } from "@/lib/types";
 
@@ -25,7 +25,11 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const candidates = await generateRewriteCandidates(result.optimizedText, 2);
+    const candidates = await generateRewriteCandidates(
+      result.optimizedText,
+      2,
+      getCharLimit(parsed.isVerified)
+    );
     const scored: AICandidate[] = candidates
       .map((text) => ({ text, score: analyzePost({ ...parsed, text }).score }))
       .filter((c) => c.score > result.after.score)

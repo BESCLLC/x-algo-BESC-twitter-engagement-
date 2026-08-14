@@ -1,3 +1,5 @@
+import { WEIGHTS, BOILERPLATE_PHRASES } from "./scoring";
+
 export class OllamaError extends Error {}
 
 // Local CPU inference on a self-hosted model can be genuinely slow —
@@ -17,20 +19,40 @@ export function ollamaConfigured(): boolean {
   return Boolean(process.env.OLLAMA_URL && process.env.OLLAMA_MODEL);
 }
 
-function buildPrompt(text: string, numVariants: number): string {
-  return `You are optimizing an X (Twitter) post to score higher against a real, published ranking algorithm. Rules that matter, from the actual production weights:
-- Ending with a genuine, specific question or clear stance dramatically increases "reply" likelihood (weighted 10-40x higher than a like) — a generic "thoughts?" bolted onto unrelated content doesn't count, it needs to actually fit what the post says.
-- ALL-CAPS words, punctuation bursts (!!!, ???), and more than 2 hashtags are penalized as spam signals.
-- Generic broadcast phrasing ("like and retweet", "link in bio", "follow for follow") is heavily penalized as spam.
-- Keep the total length under 280 characters.
-- Never invent facts, numbers, names, or tickers, and never change the meaning of the original post — preserve every specific claim exactly.
+// Pulls the real weights straight from scoring.ts (the same numbers the
+// deterministic optimizer and every risk/tip cite) instead of a hand-picked
+// subset baked into prose — so the model is chasing the actual ranked
+// hierarchy of what matters, and this can't quietly drift out of sync with
+// the real scorer as weights change.
+function buildPrompt(text: string, numVariants: number, charLimit: number): string {
+  return `You are optimizing an X (Twitter) post to score as high as possible against X's real "For You" ranking algorithm (RankingScorer). The final score is a weighted sum of predicted action probabilities — weight × P(action), summed across all actions. These are the real production weights, highest to lowest:
+
+POSITIVE (chase these, ranked by value):
+- Share via copy link: ${WEIGHTS.shareViaCopyLink} (the single highest weight in the entire model). Needs a concrete, specific, screenshot-or-send-worthy claim, stat, or story beat — vague statements don't get copy-linked to a friend.
+- Reply: ${WEIGHTS.reply} (or ${WEIGHTS.reply + WEIGHTS.bidirectionalReplyBoost} inside a mutual-follow thread). End with a genuine, specific question or clear stance that actually fits this content — not a generic "thoughts?" bolted onto anything.
+- Quote post: ${WEIGHTS.quote}, Share via DM: ${WEIGHTS.shareViaDm}
+- Follow the author: ${WEIGHTS.followAuthor}
+- Share (generic): ${WEIGHTS.share}
+- Repost: ${WEIGHTS.retweet}
+- Like: ${WEIGHTS.favorite} (the lowest positive weight of all — don't optimize for likes at the expense of the above)
+
+NEGATIVE (avoid triggering these, ranked by severity):
+- Report: ${WEIGHTS.report} (by far the single largest weight in the whole model, positive or negative)
+- Mute: ${WEIGHTS.muteAuthor}
+- Not interested: ${WEIGHTS.notInterested}
+- Block: ${WEIGHTS.blockAuthor}
+These get triggered by: ALL-CAPS shouting, punctuation bursts (!!!, ???), more than 2 hashtags, generic broadcast/boilerplate phrasing (things like ${BOILERPLATE_PHRASES.slice(0, 4).map((p) => `"${p}"`).join(", ")}), and shortened or redirect links.
+
+Other craft signals that matter here: filler/hedge words ("very", "just", "actually", "I think") and passive voice read as less confident and hold attention worse. Opening with the actual point beats opening with a wind-up ("I think", "so,", "well,"). Keep the total length under ${charLimit.toLocaleString()} characters.
+
+Never invent facts, numbers, names, or tickers, and never change the meaning of the original post. Preserve every specific claim exactly.
 
 Original post:
 """
 ${text}
 """
 
-Write ${numVariants} alternative versions of this SAME post that are tighter, more direct, and end with a hook genuinely relevant to this specific content. Keep the author's voice and every factual claim identical — only change phrasing and structure.
+Write ${numVariants} alternative versions of this SAME post that are tighter, more direct, and end with a hook genuinely relevant to this specific content. Keep the author's voice and every factual claim identical. Only change phrasing and structure.
 
 Output ONLY the alternatives, each on its own line, prefixed with "VARIANT: " and nothing else. No preamble, no explanation, no extra commentary.`;
 }
@@ -47,7 +69,8 @@ function parseVariants(raw: string, max: number): string[] {
 
 export async function generateRewriteCandidates(
   text: string,
-  numVariants = 2
+  numVariants = 2,
+  charLimit = 280
 ): Promise<string[]> {
   const url = process.env.OLLAMA_URL;
   const model = process.env.OLLAMA_MODEL;
@@ -65,7 +88,7 @@ export async function generateRewriteCandidates(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model,
-        prompt: buildPrompt(text, numVariants),
+        prompt: buildPrompt(text, numVariants, charLimit),
         stream: false,
         options: { temperature: 0.8, num_predict: MAX_OUTPUT_TOKENS },
       }),
