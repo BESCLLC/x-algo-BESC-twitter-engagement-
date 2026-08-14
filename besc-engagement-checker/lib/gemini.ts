@@ -7,6 +7,14 @@ export class GeminiError extends Error {}
 // keeps a real outage from stalling the response for anywhere near as long.
 const REQUEST_TIMEOUT_MS = 20000;
 
+// Gemini's flash-tier models can spend a chunk of maxOutputTokens on internal
+// reasoning before emitting any visible text, so a budget sized only for the
+// visible output gets truncated mid-sentence — which is how a variant ended
+// up cut off mid-URL in production. Hosted tokens are cheap and unused budget
+// costs nothing (billing is on tokens actually produced), so give generous
+// headroom rather than sizing this to the wire.
+const THINKING_HEADROOM_TOKENS = 2000;
+
 // A dated model ID (e.g. "gemini-2.5-flash") can get retired out from under
 // new API keys without warning — that's exactly what happened here. The
 // "-latest" alias is Google's own answer to that: it always resolves to
@@ -85,7 +93,7 @@ export async function generateRewriteCandidatesGemini(
   return callGeminiForVariants(
     buildRewritePrompt(text, numVariants, charLimit),
     numVariants,
-    estimateMaxOutputTokens(charLimit, numVariants)
+    estimateMaxOutputTokens(charLimit, numVariants) + THINKING_HEADROOM_TOKENS
   );
 }
 
@@ -102,6 +110,6 @@ export async function generatePostsFromContextGemini(
   return callGeminiForVariants(
     buildGeneratePrompt(context, numVariants, charLimit),
     numVariants,
-    estimateMaxOutputTokens(charLimit, numVariants)
+    estimateMaxOutputTokens(charLimit, numVariants) + THINKING_HEADROOM_TOKENS
   );
 }

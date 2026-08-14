@@ -39,6 +39,7 @@ ${WEIGHTS.report} report, ${WEIGHTS.muteAuthor} mute, ${WEIGHTS.notInterested} n
 Avoid filler words (very/just/actually/I think), passive voice, and stock AI phrasing like "${slopSample}"; open with the point, not a wind-up. Write like a real person who has something specific to say, not marketing copy. Max ${charLimit.toLocaleString()} chars.
 
 CRITICAL: Only use facts, names, and numbers that appear in the context below. Never invent specifics (stats, dates, names, outcomes) that aren't there — if the context is vague on a detail, write around it in general terms instead of making something up to sound concrete.
+CRITICAL: Never write a URL or link, not even a placeholder like "https://" or "[link]". Only include a link if the exact URL appears verbatim in the context; otherwise write the post without one — links are attached separately, outside the post text.
 
 Context from the user (a rough idea, not finished text):
 """
@@ -61,6 +62,18 @@ export function estimateMaxOutputTokens(charLimit: number, numVariants: number):
   return Math.min(2000, Math.max(250, perVariant * numVariants));
 }
 
+// A generation that runs out of output tokens mid-URL leaves a fragment like
+// "...engagement: https://" — and the deterministic optimizer will then
+// happily append a reply hook to it, producing a finished-looking post with
+// a dead link buried in the middle (observed in production). A trailing URL
+// with no real dotted domain means the model got cut off, not that it wrote
+// a short link, so drop the whole variant instead of surfacing the fragment.
+function endsWithIncompleteUrl(text: string): boolean {
+  const tail = text.match(/(?:https?:\/\/|www\.)\S*$/i);
+  if (!tail) return false;
+  return !/(?:https?:\/\/|www\.)[^\s/]*[a-z0-9-]\.[a-z]{2,}/i.test(tail[0]);
+}
+
 export function parseVariants(raw: string, max: number): string[] {
   return raw
     .split("\n")
@@ -68,5 +81,6 @@ export function parseVariants(raw: string, max: number): string[] {
     .filter((line) => /^variant:?\s*/i.test(line))
     .map((line) => line.replace(/^variant:?\s*/i, "").trim())
     .filter(Boolean)
+    .filter((line) => !endsWithIncompleteUrl(line))
     .slice(0, max);
 }
