@@ -91,12 +91,19 @@ export interface OptimizeStep {
   scoreAfter: number;
 }
 
+export interface AICandidate {
+  text: string;
+  score: number;
+}
+
 export interface OptimizeResult {
   originalText: string;
   optimizedText: string;
   applied: OptimizeStep[];
   before: ScoreResult;
   after: ScoreResult;
+  /** Optional AI-generated rewrites (only present when Ollama is configured), each scoring strictly higher than the deterministic result. */
+  aiCandidates?: AICandidate[];
 }
 
 export interface ScoreResult {

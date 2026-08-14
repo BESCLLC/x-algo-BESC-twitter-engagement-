@@ -15,6 +15,7 @@ import {
   Check,
   X,
   Rocket,
+  Sparkles,
 } from "lucide-react";
 import type {
   AnalyzeRequest,
@@ -100,9 +101,8 @@ export default function Composer({
     }
   }
 
-  function applyOptimized() {
-    if (!optimizeResult) return;
-    setText(optimizeResult.optimizedText);
+  function applyText(newText: string) {
+    setText(newText);
     setOptimizeResult(null);
     onImport?.(null);
   }
@@ -398,7 +398,7 @@ export default function Composer({
               <div className="mt-3 flex gap-2">
                 <button
                   type="button"
-                  onClick={applyOptimized}
+                  onClick={() => applyText(optimizeResult.optimizedText)}
                   className="flex items-center gap-1.5 rounded-full bg-besc-500 px-3.5 py-1.5 text-xs font-semibold text-black transition-colors hover:bg-besc-400"
                 >
                   <Check className="h-3.5 w-3.5" /> Use this version
@@ -412,6 +412,31 @@ export default function Composer({
                 </button>
               </div>
             </>
+          )}
+
+          {optimizeResult.aiCandidates && optimizeResult.aiCandidates.length > 0 && (
+            <div className="mt-4 space-y-2.5 border-t border-white/10 pt-3.5">
+              <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-besc-300">
+                <Sparkles className="h-3.5 w-3.5" /> AI-suggested rewrites (score higher than above)
+              </p>
+              {optimizeResult.aiCandidates.map((candidate, i) => (
+                <div key={i} className="rounded-xl border border-white/10 bg-black/25 p-3">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="font-mono text-xs font-semibold tabular-nums text-besc-300">
+                      {candidate.score.toFixed(1)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => applyText(candidate.text)}
+                      className="flex items-center gap-1 rounded-full bg-besc-500 px-3 py-1 text-[11px] font-semibold text-black transition-colors hover:bg-besc-400"
+                    >
+                      <Check className="h-3 w-3" /> Use this version
+                    </button>
+                  </div>
+                  <p className="text-[13px] leading-relaxed text-white/70">{candidate.text}</p>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}
