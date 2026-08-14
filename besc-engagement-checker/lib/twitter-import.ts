@@ -100,6 +100,80 @@ async function fetchRawTweet(url: string): Promise<{ id: string; raw: Raw }> {
   return { id, raw };
 }
 
+// Factored out of buildResult so the tracking flow can pull fresh numbers for
+// an already-known tweet id without re-deriving the whole import result.
+export function extractMetrics(raw: Raw): TweetImportResult["realMetrics"] {
+  return {
+    views: Number(pick<number | string>(raw, ["views", "view_count", "public_metrics.impression_count"], 0)) || 0,
+    likes:
+      Number(
+        pick<number>(
+          raw,
+          ["like_count", "favorite_count", "likes", "public_metrics.like_count", "stats.like_count", "legacy.favorite_count"],
+          0
+        )
+      ) || 0,
+    retweets:
+      Number(
+        pick<number>(
+          raw,
+          ["retweet_count", "retweets", "public_metrics.retweet_count", "stats.retweet_count", "legacy.retweet_count"],
+          0
+        )
+      ) || 0,
+    replies:
+      Number(
+        pick<number>(
+          raw,
+          ["reply_count", "replies", "public_metrics.reply_count", "stats.reply_count", "legacy.reply_count"],
+          0
+        )
+      ) || 0,
+    quotes:
+      Number(
+        pick<number>(
+          raw,
+          ["quote_count", "quotes", "public_metrics.quote_count", "stats.quote_count", "legacy.quote_count"],
+          0
+        )
+      ) || 0,
+    bookmarks:
+      Number(
+        pick<number>(
+          raw,
+          ["bookmark_count", "bookmarks", "public_metrics.bookmark_count", "stats.bookmark_count", "legacy.bookmark_count"],
+          0
+        )
+      ) || 0,
+  };
+}
+
+export interface TimelinePost {
+  tweetId: string;
+  text: string;
+  createdAt?: string;
+}
+
+/** Recent posts from a handle's profile, shaped for draft matching. */
+export async function fetchUserTimeline(handle: string): Promise<TimelinePost[]> {
+  const raw = await callVee3Tool<Raw>("x-twitter_user_timeline", { user_name: handle });
+  const entries = pick<any[]>(raw, ["entries", "tweets", "timeline", "posts", "data"], []);
+  if (!Array.isArray(entries)) return [];
+  return entries
+    .map((entry) => ({
+      tweetId: String(pick<string | number>(entry, ["id_str", "id", "rest_id", "tweet_id"], "")),
+      text: pick<string>(entry, ["text", "full_text"], ""),
+      createdAt: pick<string>(entry, ["created_at", "createdAt"], "") || undefined,
+    }))
+    .filter((t) => t.tweetId && t.tweetId !== "undefined" && t.text);
+}
+
+/** Fresh engagement numbers for one already-identified tweet. */
+export async function fetchTweetMetrics(tweetId: string): Promise<TweetImportResult["realMetrics"]> {
+  const raw = await callVee3Tool<Raw>("x-twitter_tweet_info", { id: tweetId });
+  return extractMetrics(raw);
+}
+
 function buildResult(raw: Raw, recentPostsCount: number): TweetImportResult {
   const text = pick<string>(raw, ["text", "full_text"], "");
   if (!text) {
@@ -120,49 +194,7 @@ function buildResult(raw: Raw, recentPostsCount: number): TweetImportResult {
     authorVerified: Boolean(pick<boolean>(author, ["is_blue_verified", "blue_verified", "verified"], false)),
     recentPostsCount,
     postedHoursAgo: hoursSincePosted(raw),
-    realMetrics: {
-      views: Number(pick<number | string>(raw, ["views", "view_count", "public_metrics.impression_count"], 0)) || 0,
-      likes:
-        Number(
-          pick<number>(
-            raw,
-            ["like_count", "favorite_count", "likes", "public_metrics.like_count", "stats.like_count", "legacy.favorite_count"],
-            0
-          )
-        ) || 0,
-      retweets:
-        Number(
-          pick<number>(
-            raw,
-            ["retweet_count", "retweets", "public_metrics.retweet_count", "stats.retweet_count", "legacy.retweet_count"],
-            0
-          )
-        ) || 0,
-      replies:
-        Number(
-          pick<number>(
-            raw,
-            ["reply_count", "replies", "public_metrics.reply_count", "stats.reply_count", "legacy.reply_count"],
-            0
-          )
-        ) || 0,
-      quotes:
-        Number(
-          pick<number>(
-            raw,
-            ["quote_count", "quotes", "public_metrics.quote_count", "stats.quote_count", "legacy.quote_count"],
-            0
-          )
-        ) || 0,
-      bookmarks:
-        Number(
-          pick<number>(
-            raw,
-            ["bookmark_count", "bookmarks", "public_metrics.bookmark_count", "stats.bookmark_count", "legacy.bookmark_count"],
-            0
-          )
-        ) || 0,
-    },
+    realMetrics: extractMetrics(raw),
   };
 }
 

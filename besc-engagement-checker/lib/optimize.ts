@@ -5,6 +5,7 @@ import {
   getHashtagWordSet,
   isShoutingCapsWord,
   getCharLimit,
+  STANDARD_CHAR_LIMIT,
 } from "./scoring";
 import { stripFillerWords } from "./nlp";
 import type { AnalyzeRequest, OptimizeResult, OptimizeStep } from "./types";
@@ -131,6 +132,15 @@ function buildRules(protectedWords: Set<string>, charLimit: number): Rule[] {
     forced: true,
   },
   ];
+}
+
+// Canonical id -> human label for every optimizer fix, so the tracking layer
+// can name a stored fix id without persisting its label alongside every row
+// (and without drifting from the labels users actually saw).
+export function optimizerRuleLabels(): Record<string, string> {
+  return Object.fromEntries(
+    buildRules(new Set<string>(), STANDARD_CHAR_LIMIT).map((rule) => [rule.id, rule.label])
+  );
 }
 
 /**

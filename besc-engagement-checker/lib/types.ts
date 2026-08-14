@@ -150,6 +150,68 @@ export interface OptimizeResult {
   aiCandidates?: AICandidate[];
 }
 
+export interface TrackedPostMetrics {
+  views: number;
+  likes: number;
+  retweets: number;
+  replies: number;
+  quotes: number;
+  bookmarks: number;
+}
+
+export interface TrackedPost {
+  id: number;
+  createdAt: string;
+  draftText: string;
+  predictedScore: number;
+  predictedGrade: string;
+  appliedFixIds: string[];
+  isReply: boolean;
+  mediaType: MediaType;
+  /** null until this draft has been matched to a real published post. */
+  tweetId: string | null;
+  postedAt: string | null;
+  metricsUpdatedAt: string | null;
+  metrics: TrackedPostMetrics | null;
+}
+
+export interface CalibrationSide {
+  n: number;
+  medianPredicted: number;
+  medianViews: number;
+  medianEngagements: number;
+}
+
+export interface FixInsight {
+  fixId: string;
+  label: string;
+  withN: number;
+  withoutN: number;
+  medianEngagementsWith: number;
+  medianEngagementsWithout: number;
+  /**
+   * Multiplier vs. posts without the fix; 1.0 = no observed difference.
+   * null when the baseline is 0 and no honest ratio exists — the UI shows
+   * the absolute medians instead of inventing an infinite lift.
+   */
+  lift: number | null;
+}
+
+export interface TrackSummary {
+  tracked: number;
+  measured: number;
+  /** Minimum measured posts before any calibration claim is made at all. */
+  minimumForInsights: number;
+  /** null until `measured` clears minimumForInsights — small-N engagement data is noise. */
+  scoreSplit: { higher: CalibrationSide; lower: CalibrationSide } | null;
+  fixInsights: FixInsight[];
+}
+
+export interface TrackRecord {
+  posts: TrackedPost[];
+  summary: TrackSummary;
+}
+
 export interface ScoreResult {
   score: number;
   grade: string;

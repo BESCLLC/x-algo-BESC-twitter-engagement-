@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { Github, ArrowRight } from "lucide-react";
@@ -12,12 +12,29 @@ import RiskPanel from "@/components/RiskPanel";
 import TipsPanel from "@/components/TipsPanel";
 import SocialLinks from "@/components/SocialLinks";
 import RealMetricsPanel from "@/components/RealMetricsPanel";
+import TrackRecordPanel from "@/components/TrackRecordPanel";
 import type { ScoreResult, TweetImportResult } from "@/lib/types";
+
+const HANDLE_STORAGE_KEY = "besc:handle";
 
 export default function Home() {
   const [result, setResult] = useState<ScoreResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [imported, setImported] = useState<TweetImportResult | null>(null);
+  const [handle, setHandle] = useState("");
+  // Bumped whenever a draft is tracked, so the panel below reloads without
+  // needing a shared store or a full refresh.
+  const [trackVersion, setTrackVersion] = useState(0);
+
+  // Remembered locally so a returning user's track record is just there.
+  useEffect(() => {
+    const saved = localStorage.getItem(HANDLE_STORAGE_KEY);
+    if (saved) setHandle(saved);
+  }, []);
+
+  useEffect(() => {
+    if (handle.trim()) localStorage.setItem(HANDLE_STORAGE_KEY, handle.trim());
+  }, [handle]);
 
   return (
     <main className="relative min-h-screen">
@@ -81,7 +98,14 @@ export default function Home() {
 
       <section className="mx-auto grid max-w-7xl gap-6 px-5 pb-24 sm:px-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:items-start">
         <div className="min-w-0 lg:sticky lg:top-6">
-          <Composer onResult={setResult} onLoading={setLoading} onImport={setImported} />
+          <Composer
+            onResult={setResult}
+            onLoading={setLoading}
+            onImport={setImported}
+            handleInput={handle}
+            onHandleChange={setHandle}
+            onTracked={() => setTrackVersion((v) => v + 1)}
+          />
         </div>
 
         <div className="min-w-0 space-y-6">
@@ -147,6 +171,10 @@ export default function Home() {
             )}
           </AnimatePresence>
         </div>
+      </section>
+
+      <section className="mx-auto max-w-7xl px-5 pb-24 sm:px-8">
+        <TrackRecordPanel key={trackVersion} handle={handle} />
       </section>
 
       <footer className="mx-auto flex max-w-7xl flex-col items-center gap-5 px-5 pb-14 pt-6 sm:px-8">

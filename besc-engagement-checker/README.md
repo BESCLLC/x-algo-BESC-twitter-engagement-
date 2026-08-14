@@ -73,3 +73,36 @@ described in `ollama-service/README.md`):
   `ollama-service/README.md` for standing up the Railway service.
 
 Neither set → `/api/optimize` returns `aiStatus: "disabled"` and just the deterministic result.
+
+## Optional: post tracking / score calibration
+
+The scorer is a heuristic proxy for Phoenix, not Phoenix itself — so the honest
+question is whether a higher BESC Score actually corresponds to more reach *for your
+account*. Tracking answers that with real data instead of asking you to take it on faith.
+
+Flow: hit **Track** on a draft → publish it on X → hit **Check for results**. The app
+pulls your recent timeline, fuzzy-matches the draft against what you actually posted
+(tolerant of pre-post edits and X's t.co link rewriting), then fetches the post's real
+views and engagement a couple of hours later, once numbers have had time to accumulate.
+
+Once there are enough measured posts it compares the higher-scoring half of your posts
+against the lower-scoring half, and reports which specific optimizer fixes correlated
+with better numbers for you.
+
+Set `DATABASE_URL` to a Postgres connection string to enable it (Railway: add a Postgres
+service and reference its `DATABASE_URL`). The schema is created automatically on first
+use — no migration step. Without it, tracking reports itself as unavailable and every
+other feature works exactly as before.
+
+Deliberate design choices worth knowing:
+
+- **Nothing is claimed below 6 measured posts**, and per-fix comparisons need at least 3
+  posts on each side. Engagement data is noisy enough that a "pattern" drawn from three
+  posts would be invented, not observed.
+- **Medians, not averages**, so a single post that happens to go viral can't manufacture
+  a trend.
+- **Fixes are only attributed when the tracked text is exactly the optimizer's output.**
+  Edit after optimizing and the fixes aren't recorded for that post — a wrong attribution
+  would corrupt the very data the feature exists to produce.
+- Syncing is on-demand and idempotent: it only spends API calls on posts that are matched,
+  old enough to measure, and not measured recently.

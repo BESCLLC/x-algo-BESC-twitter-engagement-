@@ -22,6 +22,7 @@ import {
   Reply,
   Copy,
   ChevronDown,
+  Activity,
 } from "lucide-react";
 import type {
   AnalyzeRequest,
@@ -53,10 +54,17 @@ export default function Composer({
   onResult,
   onLoading,
   onImport,
+  handleInput,
+  onHandleChange,
+  onTracked,
 }: {
   onResult: (r: ScoreResult | null) => void;
   onLoading: (b: boolean) => void;
   onImport?: (r: TweetImportResult | null) => void;
+  /** Lifted so the same handle drives both author lookup and post tracking. */
+  handleInput: string;
+  onHandleChange: (handle: string) => void;
+  onTracked?: () => void;
 }) {
   const [text, setText] = useState(
     "Just shipped something I've been heads-down on for weeks. What's one thing you'd want it to do next?"
@@ -70,6 +78,9 @@ export default function Composer({
   const [recentPostsCount, setRecentPostsCount] = useState(0);
   const [authorFollowers, setAuthorFollowers] = useState("");
   const [postedHoursAgo, setPostedHoursAgo] = useState(0);
+  // Mirrors what's handed to onResult, so tracking can record the exact score
+  // the user is looking at without the parent having to hand it back down.
+  const [lastResult, setLastResult] = useState<ScoreResult | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
 
@@ -83,7 +94,6 @@ export default function Composer({
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
 
-  const [handleInput, setHandleInput] = useState("");
   const [lookingUpHandle, setLookingUpHandle] = useState(false);
   const [handleLookupError, setHandleLookupError] = useState<string | null>(null);
 
@@ -316,6 +326,7 @@ export default function Composer({
       });
       if (!res.ok) throw new Error("analyze failed");
       const data: ScoreResult = await res.json();
+      setLastResult(data);
       onResult(data);
     } catch (e) {
       if ((e as Error).name !== "AbortError") {
@@ -340,6 +351,54 @@ export default function Composer({
   const overLimit = chars > charLimit;
 
   const [copied, setCopied] = useState(false);
+  const [tracking, setTracking] = useState(false);
+  const [trackState, setTrackState] = useState<"idle" | "saved">("idle");
+  const [trackError, setTrackError] = useState<string | null>(null);
+
+  async function trackThisPost() {
+    if (!text.trim() || tracking || !lastResult) return;
+    setTracking(true);
+    setTrackError(null);
+    try {
+      // Only claim fixes that are actually baked into the text being saved.
+      // If the user edited after optimizing, the optimized text no longer
+      // matches and attributing those fixes to this post would poison the
+      // very calibration data this feature exists to produce.
+      const appliedFixIds =
+        optimizeResult && optimizeResult.optimizedText === text
+          ? optimizeResult.applied.map((step) => step.id)
+          : [];
+
+      const res = await fetch("/api/track", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          handle: handleInput.trim(),
+          draftText: text,
+          predictedScore: lastResult.score,
+          predictedGrade: lastResult.grade,
+          appliedFixIds,
+          mediaType,
+          isReply,
+          hasMutualFollowAudience,
+          isVerified,
+          recentPostsCount,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Couldn't track that post");
+      if (data.enabled === false) {
+        throw new Error("Tracking isn't set up on this deployment yet.");
+      }
+      setTrackState("saved");
+      setTimeout(() => setTrackState("idle"), 2500);
+      onTracked?.();
+    } catch (e) {
+      setTrackError((e as Error).message);
+    } finally {
+      setTracking(false);
+    }
+  }
 
   async function copyDraftToClipboard() {
     if (!text.trim()) return;
@@ -358,6 +417,26 @@ export default function Composer({
       <div className="mb-3 flex items-center justify-between">
         <h2 className="font-display text-lg font-semibold">Draft your post</h2>
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={trackThisPost}
+            disabled={!text.trim() || tracking || !lastResult}
+            title={
+              handleInput.trim()
+                ? "Save this draft, then check back after you publish it to see how it really did"
+                : "Add your @handle below first — it's how this finds the post you publish"
+            }
+            className="flex items-center gap-1 text-xs font-medium text-white/50 transition-colors hover:text-white/80 disabled:cursor-not-allowed disabled:opacity-30"
+          >
+            {trackState === "saved" ? (
+              <Check className="h-3.5 w-3.5 text-besc-300" />
+            ) : tracking ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Activity className="h-3.5 w-3.5" />
+            )}
+            {trackState === "saved" ? "Tracking" : "Track"}
+          </button>
           <button
             type="button"
             onClick={copyDraftToClipboard}
@@ -595,7 +674,7 @@ export default function Composer({
         <AtSign className="h-4 w-4 shrink-0 text-white/30" />
         <input
           value={handleInput}
-          onChange={(e) => setHandleInput(e.target.value)}
+          onChange={(e) => onHandleChange(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && lookupHandle()}
           placeholder="Your @handle (auto-fills followers + verified below)"
           className="w-full min-w-0 bg-transparent text-sm text-white/80 placeholder:text-white/25 focus:outline-none"
@@ -664,6 +743,7 @@ export default function Composer({
         )}
         Optimize for the algorithm
       </button>
+      {trackError && <p className="mt-2 text-xs text-danger">{trackError}</p>}
       {optimizeError && <p className="mt-2 text-xs text-danger">{optimizeError}</p>}
 
       {optimizeResult && (
