@@ -95,6 +95,10 @@ const RIDGE_LAMBDA = 1.0;
 // Controls how fast trust shifts from heuristic to fitted: at n = SHRINKAGE_K
 // the blend is 50/50.
 const SHRINKAGE_K = 120;
+// The cross-validated R² at which a fit is trusted as much as its sample size
+// allows. Below it, influence scales down proportionally — barely clearing the
+// MIN_CV_R2 gate earns barely any say in the score.
+const STRONG_FIT_R2 = 0.3;
 
 /** Rates are small, skewed and heavy-tailed; log space keeps one viral post from dominating. */
 function toTarget(count: number, views: number): number {
@@ -278,12 +282,14 @@ export function calibratedRatio(
   const raw = fitted / actionModel.baselineRate;
   const clamped = Math.max(MIN_RATIO, Math.min(MAX_RATIO, raw));
 
-  // Confidence grows with sample size rather than flipping on at a threshold,
-  // so a model fitted on 45 posts nudges the score while one fitted on 500
-  // largely determines it. Shrinking the ratio toward 1 is the same thing as
-  // shrinking the prediction toward the heuristic.
-  const weight = model.n / (model.n + SHRINKAGE_K);
-  return 1 + weight * (clamped - 1);
+  // Trust depends on two things, not one. Sample size says how much data
+  // stands behind the fit; cross-validated R² says how much of the outcome it
+  // actually explains. Weighting on n alone let a model explaining 6% of the
+  // variance drive 64% of a real user's score — lots of data behind a fit that
+  // barely predicts anything. Both have to be good for the model to take over.
+  const sampleWeight = model.n / (model.n + SHRINKAGE_K);
+  const qualityWeight = Math.min(1, actionModel.cvR2 / STRONG_FIT_R2);
+  return 1 + sampleWeight * qualityWeight * (clamped - 1);
 }
 
 /**
@@ -302,8 +308,16 @@ export function calibratedRate(
   return Number.isFinite(adjusted) ? Math.max(0, Math.min(1, adjusted)) : null;
 }
 
-/** How much of the score is coming from real data — surfaced so the UI can be honest about it. */
+/**
+ * How much of the score is actually coming from real data. Reports the same
+ * sample x quality trust the scorer applies, rather than sample size alone —
+ * otherwise the UI would claim "64% fitted" while weak models were being
+ * heavily discounted internally.
+ */
 export function calibrationStrength(model: CalibrationModel | null): number {
-  if (!model || Object.keys(model.actions).length === 0) return 0;
-  return model.n / (model.n + SHRINKAGE_K);
+  const fitted = Object.values(model?.actions ?? {});
+  if (!model || fitted.length === 0) return 0;
+  const sampleWeight = model.n / (model.n + SHRINKAGE_K);
+  const bestQuality = Math.max(...fitted.map((a) => Math.min(1, a.cvR2 / STRONG_FIT_R2)));
+  return sampleWeight * bestQuality;
 }

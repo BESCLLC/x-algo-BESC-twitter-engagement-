@@ -53,7 +53,7 @@ export default function TrackRecordPanel({
       const c = data.calibration;
       if (!c || c.n < c.minimumForFit) {
         setLearnNote(
-          `Read ${data.fetched} posts (${data.usable} usable). Need at least ${c?.minimumForFit ?? 40} posts with view counts before the score can be fitted to your results — heuristics are still in use.`
+          `Read ${data.fetched} posts (${data.usable} usable, ${data.refreshed ?? 0} refreshed). Need at least ${c?.minimumForFit ?? 40} posts with view counts before the score can be fitted to your results — heuristics are still in use.`
         );
       } else if (!c.actions?.length) {
         setLearnNote(
@@ -62,7 +62,7 @@ export default function TrackRecordPanel({
       } else {
         const learned = c.actions.map((a: { action: string; cvR2: number }) => `${a.action} (R²${a.cvR2.toFixed(2)})`).join(", ");
         setLearnNote(
-          `Learned from ${c.n} of your posts. Now predicting ${learned} from your own results — the score is ${Math.round(c.strength * 100)}% fitted, ${Math.round((1 - c.strength) * 100)}% heuristic.`
+          `Learned from ${c.n} of your posts (${data.refreshed ?? 0} refreshed). Now predicting ${learned} from your own results — the score is ${Math.round(c.strength * 100)}% fitted, ${Math.round((1 - c.strength) * 100)}% heuristic.`
         );
       }
       await load();

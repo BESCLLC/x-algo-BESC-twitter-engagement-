@@ -102,49 +102,85 @@ async function fetchRawTweet(url: string): Promise<{ id: string; raw: Raw }> {
 
 // Factored out of buildResult so the tracking flow can pull fresh numbers for
 // an already-known tweet id without re-deriving the whole import result.
+// Every plausible spelling per metric. A timeline entry and a tweet-info
+// response don't necessarily use the same shape, and a silently-missed field
+// reads as a real zero — which is worse than an error, because it quietly
+// trains the calibration model on a metric that's always 0. Learned this the
+// hard way: 100 backfilled posts all reported 0 likes.
+const METRIC_PATHS = {
+  views: [
+    "views", "view_count", "views_count", "viewCount", "view.count",
+    "public_metrics.impression_count", "impression_count", "legacy.view_count",
+    "views.count", "ext_views.count",
+  ],
+  likes: [
+    "favorite_count", "like_count", "likes", "favourite_count", "favoriteCount",
+    "likeCount", "favorites", "public_metrics.like_count", "stats.like_count",
+    "legacy.favorite_count", "legacy.like_count",
+  ],
+  retweets: [
+    "retweet_count", "retweets", "repost_count", "reposts", "retweetCount",
+    "public_metrics.retweet_count", "stats.retweet_count", "legacy.retweet_count",
+  ],
+  replies: [
+    "reply_count", "replies", "replyCount", "public_metrics.reply_count",
+    "stats.reply_count", "legacy.reply_count",
+  ],
+  quotes: [
+    "quote_count", "quotes", "quoteCount", "quote_tweet_count",
+    "public_metrics.quote_count", "stats.quote_count", "legacy.quote_count",
+  ],
+  bookmarks: [
+    "bookmark_count", "bookmarks", "bookmarkCount",
+    "public_metrics.bookmark_count", "stats.bookmark_count", "legacy.bookmark_count",
+  ],
+} as const;
+
+function metric(raw: Raw, paths: readonly string[]): number {
+  return Number(pick<number | string>(raw, [...paths], 0)) || 0;
+}
+
 export function extractMetrics(raw: Raw): TweetImportResult["realMetrics"] {
   return {
-    views: Number(pick<number | string>(raw, ["views", "view_count", "public_metrics.impression_count"], 0)) || 0,
-    likes:
-      Number(
-        pick<number>(
-          raw,
-          ["like_count", "favorite_count", "likes", "public_metrics.like_count", "stats.like_count", "legacy.favorite_count"],
-          0
-        )
-      ) || 0,
-    retweets:
-      Number(
-        pick<number>(
-          raw,
-          ["retweet_count", "retweets", "public_metrics.retweet_count", "stats.retweet_count", "legacy.retweet_count"],
-          0
-        )
-      ) || 0,
-    replies:
-      Number(
-        pick<number>(
-          raw,
-          ["reply_count", "replies", "public_metrics.reply_count", "stats.reply_count", "legacy.reply_count"],
-          0
-        )
-      ) || 0,
-    quotes:
-      Number(
-        pick<number>(
-          raw,
-          ["quote_count", "quotes", "public_metrics.quote_count", "stats.quote_count", "legacy.quote_count"],
-          0
-        )
-      ) || 0,
-    bookmarks:
-      Number(
-        pick<number>(
-          raw,
-          ["bookmark_count", "bookmarks", "public_metrics.bookmark_count", "stats.bookmark_count", "legacy.bookmark_count"],
-          0
-        )
-      ) || 0,
+    views: metric(raw, METRIC_PATHS.views),
+    likes: metric(raw, METRIC_PATHS.likes),
+    retweets: metric(raw, METRIC_PATHS.retweets),
+    replies: metric(raw, METRIC_PATHS.replies),
+    quotes: metric(raw, METRIC_PATHS.quotes),
+    bookmarks: metric(raw, METRIC_PATHS.bookmarks),
+  };
+}
+
+/**
+ * Reports which numeric fields a timeline entry actually carries, so a
+ * mis-mapped metric can be diagnosed from a real response instead of guessed
+ * at. Returns key paths and values rather than the whole payload — enough to
+ * fix a mapping, without dumping post content into logs.
+ */
+export async function inspectTimelineShape(handle: string): Promise<{
+  sampleKeys: string[];
+  numericFields: Record<string, number>;
+  extracted: TweetImportResult["realMetrics"];
+}> {
+  const raw = await callVee3Tool<Raw>("x-twitter_user_timeline", { user_name: handle });
+  const entries = pick<any[]>(raw, ["entries", "tweets", "timeline", "posts", "data"], []);
+  const entry: Raw = Array.isArray(entries) && entries.length > 0 ? entries[0] : {};
+
+  const numericFields: Record<string, number> = {};
+  const walk = (obj: Raw, prefix = "", depth = 0) => {
+    if (!obj || typeof obj !== "object" || depth > 3) return;
+    for (const [key, value] of Object.entries(obj)) {
+      const path = prefix ? `${prefix}.${key}` : key;
+      if (typeof value === "number") numericFields[path] = value;
+      else if (value && typeof value === "object" && !Array.isArray(value)) walk(value as Raw, path, depth + 1);
+    }
+  };
+  walk(entry);
+
+  return {
+    sampleKeys: Object.keys(entry),
+    numericFields,
+    extracted: extractMetrics(entry),
   };
 }
 

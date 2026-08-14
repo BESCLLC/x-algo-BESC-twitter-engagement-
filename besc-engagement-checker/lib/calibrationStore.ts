@@ -1,5 +1,5 @@
 import { query } from "./db";
-import { extractFeatures } from "./scoring";
+import { analyzePost, extractFeatures } from "./scoring";
 import { fetchUserTimelinePage } from "./twitter-import";
 import {
   type CalibrationModel,
@@ -17,6 +17,8 @@ const BACKFILL_TARGET_POSTS = 400;
 export interface BackfillResult {
   fetched: number;
   inserted: number;
+  /** Already-known posts whose numbers (and stale predicted scores) were updated. */
+  refreshed: number;
   usable: number;
 }
 
@@ -41,6 +43,7 @@ export async function backfillFromTimeline(
   let cursor: string | undefined;
   let fetched = 0;
   let inserted = 0;
+  let refreshed = 0;
   const seenCursors = new Set<string>();
 
   for (let page = 0; page < MAX_BACKFILL_PAGES && fetched < BACKFILL_TARGET_POSTS; page++) {
@@ -55,21 +58,57 @@ export async function backfillFromTimeline(
       // while contributing nothing but a zero-denominator row.
       if (!metrics || metrics.views <= 0) continue;
 
+      // Score the post as the tool would have scored it before publishing.
+      // Backfilled rows previously stored 0 here, which made the "does the
+      // score predict reach?" comparison split a column of identical zeroes —
+      // it reported two halves at "score ~0" and compared noise. With a real
+      // predicted score this becomes an actual backtest of the scorer against
+      // outcomes it never saw.
+      const predicted = analyzePost({
+        text: post.text,
+        mediaType: post.mediaType ?? "none",
+        link: "",
+        isReply: false,
+        hasMutualFollowAudience: false,
+        recentPostsCount: 0,
+        nsfw: false,
+      });
+
       const postedAt = post.createdAt ? new Date(post.createdAt) : null;
-      const rows = await query<{ id: number }>(
+      const rows = await query<{ inserted: boolean }>(
         `INSERT INTO tracked_posts
            (author_handle, draft_text, predicted_score, predicted_grade, applied_fix_ids,
             media_type, is_reply, source, tweet_id, matched_at, posted_at,
             metrics_updated_at, views, likes, retweets, replies, quotes, bookmarks)
-         VALUES ($1,$2,0,'',$3,$4,FALSE,'backfill',$5,NOW(),$6,NOW(),$7,$8,$9,$10,$11,$12)
+         VALUES ($1,$2,$13,$14,$3,$4,FALSE,'backfill',$5,NOW(),$6,NOW(),$7,$8,$9,$10,$11,$12)
          -- tracked_posts_tweet_idx is a PARTIAL unique index (WHERE tweet_id
          -- IS NOT NULL, so unpublished drafts don't collide on NULL). Postgres
          -- will not infer a partial index for ON CONFLICT unless the statement
          -- repeats its predicate — without this it fails outright with
          -- "no unique or exclusion constraint matching the ON CONFLICT
          -- specification".
-         ON CONFLICT (tweet_id) WHERE tweet_id IS NOT NULL DO NOTHING
-         RETURNING id`,
+         -- Refresh rather than skip. Engagement keeps accruing after a post
+         -- is first seen, and a re-run also repairs rows written by an older
+         -- version (the first backfill stored predicted_score = 0, which made
+         -- the calibration split compare a column of zeroes). predicted_score
+         -- is only overwritten for backfilled rows — on a manually tracked
+         -- draft it's the real pre-publish prediction and must survive.
+         ON CONFLICT (tweet_id) WHERE tweet_id IS NOT NULL DO UPDATE SET
+           views = EXCLUDED.views,
+           likes = EXCLUDED.likes,
+           retweets = EXCLUDED.retweets,
+           replies = EXCLUDED.replies,
+           quotes = EXCLUDED.quotes,
+           bookmarks = EXCLUDED.bookmarks,
+           metrics_updated_at = NOW(),
+           media_type = EXCLUDED.media_type,
+           predicted_score = CASE WHEN tracked_posts.source = 'backfill'
+                                  THEN EXCLUDED.predicted_score ELSE tracked_posts.predicted_score END,
+           predicted_grade = CASE WHEN tracked_posts.source = 'backfill'
+                                  THEN EXCLUDED.predicted_grade ELSE tracked_posts.predicted_grade END
+         -- xmax = 0 distinguishes a fresh insert from an update, so the
+         -- reported counts stay truthful on a re-run.
+         RETURNING (xmax = 0) AS inserted`,
         [
           normalized,
           post.text,
@@ -83,9 +122,12 @@ export async function backfillFromTimeline(
           metrics.replies,
           metrics.quotes,
           metrics.bookmarks,
+          predicted.score,
+          predicted.grade,
         ]
       );
-      if (rows.length > 0) inserted++;
+      if (rows[0]?.inserted) inserted++;
+      else if (rows.length > 0) refreshed++;
     }
 
     // A missing or repeating cursor means there's no more history to walk;
@@ -96,7 +138,7 @@ export async function backfillFromTimeline(
   }
 
   const usable = await countUsableSamples(normalized);
-  return { fetched, inserted, usable };
+  return { fetched, inserted, refreshed, usable };
 }
 
 async function countUsableSamples(handle: string): Promise<number> {
