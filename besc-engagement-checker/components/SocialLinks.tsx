@@ -1,6 +1,6 @@
 import { Globe, X as XIcon, Code2 } from "lucide-react";
 
-const LINKS = [
+export const SOCIAL_LINKS = [
   {
     id: "x",
     label: "@BESCLLC",
@@ -28,7 +28,7 @@ export default function SocialLinks({
 }) {
   return (
     <div className="flex flex-wrap items-center justify-center gap-2">
-      {LINKS.map((l) => {
+      {SOCIAL_LINKS.map((l) => {
         const Icon = l.icon;
         return (
           <a

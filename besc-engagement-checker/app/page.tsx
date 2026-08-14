@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
-import { Github, ArrowRight } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import Background from "@/components/Background";
+import SiteHeader from "@/components/SiteHeader";
 import Composer from "@/components/Composer";
 import ScoreGauge from "@/components/ScoreGauge";
 import SignalBreakdown from "@/components/SignalBreakdown";
@@ -40,29 +41,7 @@ export default function Home() {
     <main className="relative min-h-screen">
       <Background />
 
-      <header className="mx-auto flex max-w-7xl items-center justify-between px-5 py-6 sm:px-8">
-        <div className="flex items-center gap-2.5">
-          <div className="relative h-9 w-9 shrink-0 drop-shadow-[0_0_14px_rgba(194,146,79,0.45)]">
-            <Image src="/besc-logo.png" alt="BESC" fill sizes="36px" className="object-contain" priority />
-          </div>
-          <span className="font-display text-[15px] font-bold tracking-tight">
-            <span className="text-gold">BESC</span>{" "}
-            <span className="text-white/40 font-medium">Engagement Checker</span>
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <a
-            href="https://github.com/BESCLLC/x-algo-BESC-twitter-engagement-"
-            target="_blank"
-            rel="noreferrer"
-            className="hidden items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3.5 py-1.5 text-xs font-medium text-white/50 transition-colors hover:text-white/80 sm:flex"
-          >
-            <Github className="h-3.5 w-3.5" />
-            View the algorithm
-          </a>
-          <SocialLinks />
-        </div>
-      </header>
+      <SiteHeader />
 
       <section className="mx-auto max-w-7xl px-5 pb-6 pt-4 sm:px-8 sm:pb-10">
         <div className="flex flex-col items-start gap-4">
