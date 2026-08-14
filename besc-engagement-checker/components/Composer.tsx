@@ -18,6 +18,7 @@ import {
   Sparkles,
   BadgeCheck,
   AtSign,
+  Undo2,
 } from "lucide-react";
 import type {
   AnalyzeRequest,
@@ -28,6 +29,13 @@ import type {
   TweetImportResult,
 } from "@/lib/types";
 import { getCharLimit } from "@/lib/scoring";
+
+// A candidate has to clear the deterministic score by this many BESC-score
+// points before it's applied automatically instead of requiring a manual
+// "Use this version" click. Below this margin the improvement could be
+// noise-level, and this app has a real history of AI rewrites drifting a
+// claim's meaning — auto-applying anything and everything isn't worth it.
+const AI_AUTO_APPLY_MARGIN = 5;
 
 const MEDIA_OPTIONS: { id: MediaType; label: string; icon: typeof ImageIcon }[] = [
   { id: "none", label: "Text only", icon: Ban },
@@ -103,12 +111,17 @@ export default function Composer({
   const [optimizeResult, setOptimizeResult] = useState<OptimizeResult | null>(null);
   const [optimizing, setOptimizing] = useState(false);
   const [optimizeError, setOptimizeError] = useState<string | null>(null);
+  const [aiAutoApplied, setAiAutoApplied] = useState(false);
+  const [preAiText, setPreAiText] = useState<string | null>(null);
 
   async function optimize() {
     if (!text.trim() || optimizing) return;
     setOptimizing(true);
     setOptimizeError(null);
     setOptimizeResult(null);
+    setAiAutoApplied(false);
+    setPreAiText(null);
+    const textBeforeOptimize = text;
     try {
       const payload: AnalyzeRequest = {
         text,
@@ -140,7 +153,16 @@ export default function Composer({
       }
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Optimize failed");
-      setOptimizeResult(data as OptimizeResult);
+      const result = data as OptimizeResult;
+      setOptimizeResult(result);
+
+      const topCandidate = result.aiStatus === "found" ? result.aiCandidates?.[0] : undefined;
+      if (topCandidate && topCandidate.score - result.after.score >= AI_AUTO_APPLY_MARGIN) {
+        setPreAiText(textBeforeOptimize);
+        setText(topCandidate.text);
+        setAiAutoApplied(true);
+        onImport?.(null);
+      }
     } catch (e) {
       const err = e as Error;
       setOptimizeError(err.name === "AbortError" ? "Optimize timed out. Try again." : err.message);
@@ -152,7 +174,15 @@ export default function Composer({
   function applyText(newText: string) {
     setText(newText);
     setOptimizeResult(null);
+    setAiAutoApplied(false);
+    setPreAiText(null);
     onImport?.(null);
+  }
+
+  function undoAiAutoApply() {
+    if (preAiText !== null) setText(preAiText);
+    setAiAutoApplied(false);
+    setPreAiText(null);
   }
 
   async function importFromUrl() {
@@ -281,6 +311,8 @@ export default function Composer({
           setText(e.target.value);
           onImport?.(null);
           setOptimizeResult(null);
+          setAiAutoApplied(false);
+          setPreAiText(null);
           setPostedHoursAgo(0);
         }}
         placeholder="What's happening?"
@@ -501,13 +533,41 @@ export default function Composer({
 
           <div className="mt-4 flex items-center gap-1.5 border-t border-white/10 pt-3 text-[11px] text-white/35">
             <Sparkles className="h-3.5 w-3.5 shrink-0" />
-            {optimizeResult.aiStatus === "disabled" && "AI rewrites are off. Ollama isn't configured for this deployment."}
+            {optimizeResult.aiStatus === "disabled" && "AI rewrites are off. Neither Gemini nor Ollama is configured for this deployment."}
             {optimizeResult.aiStatus === "error" && "AI rewrite failed to respond. Showing the mechanical fixes only."}
             {optimizeResult.aiStatus === "no_improvement" && "AI checked this draft and didn't find a rewrite that scores higher."}
-            {optimizeResult.aiStatus === "found" && "AI found rewrites that score higher than the mechanical fixes above."}
+            {optimizeResult.aiStatus === "found" &&
+              (aiAutoApplied
+                ? "AI found a rewrite that clearly scored higher and applied it to your draft above."
+                : "AI found rewrites that score higher than the mechanical fixes above.")}
           </div>
 
-          {optimizeResult.aiStatus === "found" && optimizeResult.aiCandidates && (
+          {optimizeResult.aiStatus === "found" && aiAutoApplied && optimizeResult.aiCandidates && (
+            <div className="mt-2.5 rounded-xl border border-warn/40 bg-warn/10 p-3">
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="font-mono text-xs font-semibold tabular-nums text-besc-300">
+                  Auto-applied · {optimizeResult.aiCandidates[0].score.toFixed(1)} (+
+                  {(optimizeResult.aiCandidates[0].score - optimizeResult.after.score).toFixed(1)})
+                </span>
+                <button
+                  type="button"
+                  onClick={undoAiAutoApply}
+                  className="flex items-center gap-1 rounded-full border border-white/20 px-3 py-1 text-[11px] font-medium text-white/70 transition-colors hover:text-white"
+                >
+                  <Undo2 className="h-3 w-3" /> Undo
+                </button>
+              </div>
+              <p className="text-[11px] leading-relaxed text-warn/80">
+                This scored {AI_AUTO_APPLY_MARGIN}+ points higher than the mechanical fixes, so it
+                replaced your draft automatically. AI can rephrase a claim in a way that changes its
+                meaning (e.g. turning a pending status into a done one) even when told not to — a
+                higher score only means it fits the algorithm&apos;s signals better, not that it&apos;s
+                factually accurate. Read it over before posting.
+              </p>
+            </div>
+          )}
+
+          {optimizeResult.aiStatus === "found" && !aiAutoApplied && optimizeResult.aiCandidates && (
             <div className="mt-2.5 space-y-2.5">
               <p className="text-[11px] leading-relaxed text-warn/80">
                 Read this before using it. The AI can rephrase a claim in a way that changes its
