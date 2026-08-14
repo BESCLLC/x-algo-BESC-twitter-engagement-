@@ -17,9 +17,11 @@ import {
   Rocket,
   Sparkles,
   BadgeCheck,
+  AtSign,
 } from "lucide-react";
 import type {
   AnalyzeRequest,
+  AuthorLookupResult,
   MediaType,
   OptimizeResult,
   ScoreResult,
@@ -66,6 +68,37 @@ export default function Composer({
   const [importUrl, setImportUrl] = useState("");
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+
+  const [handleInput, setHandleInput] = useState("");
+  const [lookingUpHandle, setLookingUpHandle] = useState(false);
+  const [handleLookupError, setHandleLookupError] = useState<string | null>(null);
+
+  async function lookupHandle() {
+    if (!handleInput.trim() || lookingUpHandle) return;
+    setLookingUpHandle(true);
+    setHandleLookupError(null);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
+    try {
+      const res = await fetch("/api/lookup-author", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ handle: handleInput.trim() }),
+        signal: controller.signal,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Lookup failed");
+      const result = data as AuthorLookupResult;
+      setAuthorFollowers(String(result.authorFollowers));
+      setIsVerified(result.authorVerified);
+    } catch (e) {
+      const err = e as Error;
+      setHandleLookupError(err.name === "AbortError" ? "Lookup timed out. Try again." : err.message);
+    } finally {
+      clearTimeout(timeoutId);
+      setLookingUpHandle(false);
+    }
+  }
 
   const [optimizeResult, setOptimizeResult] = useState<OptimizeResult | null>(null);
   const [optimizing, setOptimizing] = useState(false);
@@ -325,6 +358,27 @@ export default function Composer({
       </div>
 
       <div className="mt-4 flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-3.5 py-2.5">
+        <AtSign className="h-4 w-4 shrink-0 text-white/30" />
+        <input
+          value={handleInput}
+          onChange={(e) => setHandleInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && lookupHandle()}
+          placeholder="Your @handle (auto-fills followers + verified below)"
+          className="w-full min-w-0 bg-transparent text-sm text-white/80 placeholder:text-white/25 focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={lookupHandle}
+          disabled={!handleInput.trim() || lookingUpHandle}
+          className="flex shrink-0 items-center gap-1.5 rounded-full border border-besc-400/40 bg-besc-500/10 px-3 py-1 text-xs font-medium text-besc-200 transition-colors hover:bg-besc-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {lookingUpHandle ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+          Fetch
+        </button>
+      </div>
+      {handleLookupError && <p className="mt-1.5 text-xs text-danger">{handleLookupError}</p>}
+
+      <div className="mt-2.5 flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-3.5 py-2.5">
         <Rocket className="h-4 w-4 shrink-0 text-white/30" />
         <input
           type="number"
@@ -332,7 +386,7 @@ export default function Composer({
           inputMode="numeric"
           value={authorFollowers}
           onChange={(e) => setAuthorFollowers(e.target.value)}
-          placeholder="Your follower count (optional, unlocks the cold-start boost check)"
+          placeholder="Or enter your follower count manually (unlocks the cold-start boost check)"
           className="w-full min-w-0 bg-transparent text-sm text-white/80 placeholder:text-white/25 focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         />
       </div>

@@ -65,6 +65,13 @@ export interface FeatureReport {
   urlReason: string | null;
 }
 
+export interface AuthorLookupResult {
+  authorHandle: string;
+  authorName: string;
+  authorFollowers: number;
+  authorVerified: boolean;
+}
+
 export interface TweetImportResult {
   text: string;
   mediaType: MediaType;

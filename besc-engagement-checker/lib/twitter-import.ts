@@ -1,5 +1,5 @@
 import { callVee3Tool } from "./vee3";
-import type { MediaType, TweetImportResult } from "./types";
+import type { AuthorLookupResult, MediaType, TweetImportResult } from "./types";
 
 const RECENT_WINDOW_MS = 3 * 60 * 60 * 1000;
 
@@ -139,6 +139,37 @@ function buildResult(raw: Raw, recentPostsCount: number): TweetImportResult {
           )
         ) || 0,
     },
+  };
+}
+
+export function parseHandle(input: string): string | null {
+  const trimmed = input.trim().replace(/^@/, "");
+  if (/^[A-Za-z0-9_]{1,15}$/.test(trimmed)) return trimmed;
+  const match = trimmed.match(/(?:twitter|x)\.com\/([A-Za-z0-9_]{1,15})\/?$/i);
+  return match ? match[1] : null;
+}
+
+export async function lookupAuthor(handleInput: string): Promise<AuthorLookupResult> {
+  const handle = parseHandle(handleInput);
+  if (!handle) {
+    throw new Error("That doesn't look like a valid @handle.");
+  }
+
+  const raw = await callVee3Tool<Raw>("x-twitter_user_info", { user_name: handle });
+  // The account object may come back nested (user/data/result) or flat,
+  // depending on the exact shape Vee3 returns for this tool.
+  const user = pick<Raw>(raw, ["user", "data", "result"], raw);
+
+  const authorHandle = pick<string>(user, ["user_name", "screen_name", "username"], "");
+  if (!authorHandle) {
+    throw new Error("Vee3 didn't return account info for that handle.");
+  }
+
+  return {
+    authorHandle,
+    authorName: pick<string>(user, ["name", "display_name"], ""),
+    authorFollowers: Number(pick<number>(user, ["followers_count", "followers", "sub_count"], 0)) || 0,
+    authorVerified: Boolean(pick<boolean>(user, ["is_blue_verified", "blue_verified", "verified"], false)),
   };
 }
 
