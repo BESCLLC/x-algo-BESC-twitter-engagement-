@@ -5,7 +5,13 @@ export class OllamaError extends Error {}
 // with the Vee3 "loads forever" bug: an external call with no deadline
 // leaves the UI spinning with no way out. Sized for the default 14B model on
 // CPU; tighten this back up if you drop to a smaller model.
-const REQUEST_TIMEOUT_MS = 90000;
+const REQUEST_TIMEOUT_MS = 100000;
+
+// Unbounded generation is the other half of the timeout risk: nothing was
+// capping how many tokens the model could produce before stopping on its
+// own, so a verbose response could run long regardless of the timeout. Two
+// short rewrite variants need well under this many tokens.
+const MAX_OUTPUT_TOKENS = 250;
 
 export function ollamaConfigured(): boolean {
   return Boolean(process.env.OLLAMA_URL && process.env.OLLAMA_MODEL);
@@ -61,7 +67,7 @@ export async function generateRewriteCandidates(
         model,
         prompt: buildPrompt(text, numVariants),
         stream: false,
-        options: { temperature: 0.8 },
+        options: { temperature: 0.8, num_predict: MAX_OUTPUT_TOKENS },
       }),
       signal: controller.signal,
     });

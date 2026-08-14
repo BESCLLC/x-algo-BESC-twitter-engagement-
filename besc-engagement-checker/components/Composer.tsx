@@ -122,7 +122,11 @@ export default function Composer({
         isVerified,
       };
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 100000);
+      // Kept above lib/ollama.ts's own 100s request timeout so a slow AI
+      // call resolves to a graceful "aiStatus: error" fallback from the
+      // server, instead of the client aborting first and losing the
+      // deterministic result along with it.
+      const timeoutId = setTimeout(() => controller.abort(), 115000);
       let res: Response;
       try {
         res = await fetch("/api/optimize", {
