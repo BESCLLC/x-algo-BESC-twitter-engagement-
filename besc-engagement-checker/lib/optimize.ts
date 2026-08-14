@@ -1,4 +1,5 @@
 import { analyzePost, BOILERPLATE_PHRASES, REPLY_CTA_PHRASES } from "./scoring";
+import { stripFillerWords } from "./nlp";
 import type { AnalyzeRequest, OptimizeResult, OptimizeStep } from "./types";
 
 const CHAR_LIMIT = 280;
@@ -102,6 +103,13 @@ const RULES: Rule[] = [
     transform: stripBoilerplateCTA,
   },
   {
+    id: "cut-filler",
+    label: "Cut filler/hedge words",
+    reason:
+      'Words like "very", "just", "actually", and "I think" dilute a claim without adding information — tighter phrasing reads more direct and holds attention better.',
+    transform: stripFillerWords,
+  },
+  {
     id: "add-reply-hook",
     label: "Added a genuine reply hook",
     reason: "Reply is weighted 5.0–20.0 vs 0.5 for a like — 10–40x more valuable. A real question gives people a reason to respond.",
@@ -133,8 +141,15 @@ export function optimizePost(req: AnalyzeRequest): OptimizeResult {
   const before = analyzePost(req);
   let current: AnalyzeRequest = { ...req };
   let currentScore = before;
+  let anyForcedApplied = false;
   const appliedMap = new Map<string, OptimizeStep>();
 
+  // Walk permissively (>=, not >): the displayed score is clamped/rounded,
+  // so a badly-spammy draft can sit pinned at 0 for several individual steps
+  // in a row even though they're necessary staging toward a real improvement
+  // a few steps later. Gating each step strictly would reject all of them
+  // and leave the draft untouched. Whether the walk was actually worthwhile
+  // gets decided once, below, by comparing the final score to the start.
   for (let pass = 0; pass < MAX_PASSES; pass++) {
     let changedThisPass = false;
 
@@ -146,6 +161,7 @@ export function optimizePost(req: AnalyzeRequest): OptimizeResult {
       const candidateScore = analyzePost(candidate);
 
       if (rule.forced || candidateScore.score >= currentScore.score) {
+        if (rule.forced) anyForcedApplied = true;
         const existing = appliedMap.get(rule.id);
         if (existing) {
           existing.scoreAfter = candidateScore.score;
@@ -167,11 +183,24 @@ export function optimizePost(req: AnalyzeRequest): OptimizeResult {
     if (!changedThisPass) break;
   }
 
-  return {
-    originalText: req.text,
-    optimizedText: current.text,
-    applied: Array.from(appliedMap.values()),
-    before,
-    after: currentScore,
-  };
+  // Only surface the walk's result if it was actually worth it overall — a
+  // hard constraint (char limit) always counts; otherwise require a real
+  // net score gain, not just a string of individually-flat steps.
+  const worthKeeping = anyForcedApplied || currentScore.score > before.score;
+
+  return worthKeeping
+    ? {
+        originalText: req.text,
+        optimizedText: current.text,
+        applied: Array.from(appliedMap.values()),
+        before,
+        after: currentScore,
+      }
+    : {
+        originalText: req.text,
+        optimizedText: req.text,
+        applied: [],
+        before,
+        after: before,
+      };
 }

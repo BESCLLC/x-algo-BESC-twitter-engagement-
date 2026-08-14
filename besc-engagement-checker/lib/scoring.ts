@@ -6,6 +6,7 @@ import type {
   ScoreResult,
   Tip,
 } from "./types";
+import { countFillerWords, passiveVoiceSentenceRatio, hasWeakOpener } from "./nlp";
 
 /**
  * ─────────────────────────────────────────────────────────────────────────
@@ -179,6 +180,9 @@ export function extractFeatures(text: string, link: string): FeatureReport {
     hasBoilerplateCTA,
     hasNumbers,
     hasThreadMarker,
+    fillerWords: countFillerWords(trimmed),
+    passiveVoiceRatio: passiveVoiceSentenceRatio(trimmed),
+    hasWeakOpener: hasWeakOpener(trimmed),
     urlRisk,
     urlReason,
   };
@@ -231,20 +235,31 @@ function estimateActionProbabilities(
       (f.mentions >= 4 ? 0.2 : 0)
   );
 
+  // Filler words / passive voice / a weak opening line are general writing-craft
+  // signals (not repo-cited weights) — a small drag on attention and reply,
+  // since a muddier or less direct post gives people less to react to.
+  const wordinessPenalty = clamp01(
+    Math.min(f.fillerWords, 6) / 6 * 0.12 +
+      f.passiveVoiceRatio * 0.15 +
+      (f.hasWeakOpener ? 0.08 : 0)
+  );
+
   const favorite = clamp01(
     0.05 +
       lengthScore * 0.15 +
       (hasMedia ? 0.1 : 0) +
       Math.min(f.emojis, 3) * 0.02 +
       (f.hasNumbers ? 0.03 : 0) -
-      spamPenalty * 0.15
+      spamPenalty * 0.15 -
+      wordinessPenalty * 0.06
   );
 
   const reply = clamp01(
     0.02 +
       (f.hasQuestion > 0 ? 0.18 : 0) +
       (f.hasReplyCTA ? 0.28 : 0) -
-      spamPenalty * 0.1
+      spamPenalty * 0.1 -
+      wordinessPenalty * 0.08
   );
 
   const retweet = clamp01(
@@ -277,7 +292,9 @@ function estimateActionProbabilities(
   const report = clamp01(
     0.0005 + (f.urlRisk ? 0.01 : 0) + spamPenalty * 0.02
   );
-  const notDwelled = clamp01(0.35 - lengthScore * 0.15 + spamPenalty * 0.2);
+  const notDwelled = clamp01(
+    0.35 - lengthScore * 0.15 + spamPenalty * 0.2 + wordinessPenalty * 0.3
+  );
 
   return {
     favorite,
@@ -602,6 +619,36 @@ function buildRisks(f: FeatureReport, req: AnalyzeRequest): RiskFlag[] {
 
 function buildTips(f: FeatureReport, req: AnalyzeRequest, risks: RiskFlag[]): Tip[] {
   const tips: Tip[] = [];
+
+  if (f.hasWeakOpener) {
+    tips.push({
+      id: "weak-opener",
+      title: "Open with the point, not a wind-up",
+      detail:
+        'Starting with "I think", "just wanted to", or "so," buries the actual claim. People decide whether to keep reading in the first few words — lead with the thing that matters.',
+      impact: "high",
+    });
+  }
+
+  if (f.fillerWords >= 2) {
+    tips.push({
+      id: "cut-filler",
+      title: `Cut ${f.fillerWords} filler word${f.fillerWords > 1 ? "s" : ""} ("very", "just", "actually"...)`,
+      detail:
+        "Hedges and filler words dilute a claim without adding information. Tighter, more direct phrasing reads as more confident and holds attention better.",
+      impact: "medium",
+    });
+  }
+
+  if (f.passiveVoiceRatio > 0.4) {
+    tips.push({
+      id: "active-voice",
+      title: "Switch passive constructions to active voice",
+      detail:
+        '"The report was written by the team" reads weaker than "The team wrote the report." Active voice is more direct and easier to scan mid-scroll.',
+      impact: "medium",
+    });
+  }
 
   if (!f.hasReplyCTA && f.hasQuestion === 0) {
     tips.push({

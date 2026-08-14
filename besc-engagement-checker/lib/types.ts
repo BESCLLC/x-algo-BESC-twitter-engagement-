@@ -56,6 +56,9 @@ export interface FeatureReport {
   hasBoilerplateCTA: boolean;
   hasNumbers: boolean;
   hasThreadMarker: boolean;
+  fillerWords: number;
+  passiveVoiceRatio: number;
+  hasWeakOpener: boolean;
   urlRisk: boolean;
   urlReason: string | null;
 }
