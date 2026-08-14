@@ -19,6 +19,7 @@ import {
   BadgeCheck,
   AtSign,
   Undo2,
+  Reply,
 } from "lucide-react";
 import type {
   AnalyzeRequest,
@@ -58,7 +59,8 @@ export default function Composer({
   );
   const [mediaType, setMediaType] = useState<MediaType>("photo");
   const [link, setLink] = useState("");
-  const [isReplyToMutual, setIsReplyToMutual] = useState(false);
+  const [isReply, setIsReply] = useState(false);
+  const [hasMutualFollowAudience, setHasMutualFollowAudience] = useState(false);
   const [nsfw, setNsfw] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
   const [recentPostsCount, setRecentPostsCount] = useState(0);
@@ -127,7 +129,8 @@ export default function Composer({
         text,
         mediaType,
         link,
-        isReplyToMutual,
+        isReply,
+        hasMutualFollowAudience,
         recentPostsCount,
         nsfw,
         authorFollowers: parsedFollowers(),
@@ -233,7 +236,8 @@ export default function Composer({
         text,
         mediaType,
         link,
-        isReplyToMutual,
+        isReply,
+        hasMutualFollowAudience,
         recentPostsCount,
         nsfw,
         authorFollowers: parsedFollowers(),
@@ -265,7 +269,7 @@ export default function Composer({
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text, mediaType, link, isReplyToMutual, nsfw, recentPostsCount, authorFollowers, postedHoursAgo, isVerified]);
+  }, [text, mediaType, link, isReply, hasMutualFollowAudience, nsfw, recentPostsCount, authorFollowers, postedHoursAgo, isVerified]);
 
   const charLimit = getCharLimit(isVerified);
   const chars = text.length;
@@ -355,13 +359,32 @@ export default function Composer({
       <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
         <label className="flex cursor-pointer items-center justify-between gap-2 rounded-2xl border border-white/10 bg-black/20 px-3.5 py-2.5">
           <span className="flex min-w-0 items-center gap-2 text-sm text-white/70">
-            <Users className="h-4 w-4 shrink-0 text-white/35" />
-            <span className="truncate">Reply to a mutual follower</span>
+            <Reply className="h-4 w-4 shrink-0 text-white/35" />
+            <span className="truncate">This is a reply</span>
           </span>
           <input
             type="checkbox"
-            checked={isReplyToMutual}
-            onChange={(e) => setIsReplyToMutual(e.target.checked)}
+            checked={isReply}
+            onChange={(e) => setIsReply(e.target.checked)}
+            className="h-4 w-4 shrink-0 accent-besc-500"
+          />
+        </label>
+
+        <label
+          className={`flex items-center justify-between gap-2 rounded-2xl border border-white/10 bg-black/20 px-3.5 py-2.5 ${
+            isReply ? "cursor-not-allowed opacity-40" : "cursor-pointer"
+          }`}
+          title="Whether a meaningful share of your followers follow you back. Only matters for original posts — replies never get this bonus."
+        >
+          <span className="flex min-w-0 items-center gap-2 text-sm text-white/70">
+            <Users className="h-4 w-4 shrink-0 text-white/35" />
+            <span className="truncate">Mostly mutual-follow audience</span>
+          </span>
+          <input
+            type="checkbox"
+            checked={hasMutualFollowAudience}
+            disabled={isReply}
+            onChange={(e) => setHasMutualFollowAudience(e.target.checked)}
             className="h-4 w-4 shrink-0 accent-besc-500"
           />
         </label>

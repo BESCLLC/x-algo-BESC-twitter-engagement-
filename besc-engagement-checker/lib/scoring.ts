@@ -21,7 +21,12 @@ import { countFillerWords, passiveVoiceSentenceRatio, hasWeakOpener } from "./nl
 export const WEIGHTS = {
   favorite: 0.5,
   reply: 5.0,
-  bidirectionalReplyBoost: 15.0, // added to reply weight, mutual-follow + original post only
+  // Added to reply weight, but only for an ORIGINAL post (not itself a
+  // reply/retweet) shown to a viewer who mutually follows the author —
+  // verified against ranking_scorer.rs's bidirectional_boost_eligible(),
+  // which requires in_reply_to_tweet_id.is_none() && retweeted_tweet_id.is_none().
+  // A post that IS a reply never gets this boost, regardless of who it's to.
+  bidirectionalReplyBoost: 15.0,
   retweet: 1.0,
   photoExpand: 0.05,
   videoOpen: 0.05,
@@ -399,8 +404,9 @@ function buildActionRows(
   p: ActionProbabilities,
   req: AnalyzeRequest
 ): ActionRow[] {
+  const bidirectionalBoostEligible = !req.isReply && req.hasMutualFollowAudience;
   const replyWeight =
-    WEIGHTS.reply + (req.isReplyToMutual ? WEIGHTS.bidirectionalReplyBoost : 0);
+    WEIGHTS.reply + (bidirectionalBoostEligible ? WEIGHTS.bidirectionalReplyBoost : 0);
 
   const rows: ActionRow[] = [
     {
@@ -410,8 +416,8 @@ function buildActionRows(
       weight: replyWeight,
       probability: p.reply,
       contribution: replyWeight * p.reply,
-      weightSource: req.isReplyToMutual
-        ? "ReplyWeight (5.0) + BidirectionalFollowReplyWeightBoost (15.0)"
+      weightSource: bidirectionalBoostEligible
+        ? "ReplyWeight (5.0) + BidirectionalFollowReplyWeightBoost (15.0) — original posts to a mutual-follow audience only"
         : "ReplyWeight = 5.0",
     },
     {
@@ -666,12 +672,34 @@ function buildRisks(f: FeatureReport, req: AnalyzeRequest): RiskFlag[] {
       source: "home-mixer/params/param.rs: OonWeightFactor = 0.75, TopicOonWeightFactor = 0.5",
       triggered: true,
     },
+    {
+      id: "reply-reach-limit",
+      severity: "warning",
+      title: "Replies structurally reach far less than an original post",
+      detail:
+        "This is more than a discount. OONRetweetReplyFilter removes replies and reposts from recommendations entirely for anyone who doesn't already follow you — they never enter that candidate pool at all, mutual or not. Even shown to your own followers, a reply/repost still gets rescored at the same 0.75x multiplier as out-of-network content (on by default). And replies are excluded from both the cold-start boost and the bidirectional mutual-follow reply-weight boost below — those only ever apply to original posts.",
+      source:
+        "home-mixer/filters/oon_retweet_reply_filter.rs; home-mixer/scorers/ranking_scorer.rs:744-753 (EnableOonRescoreForInNetworkRepliesRetweets, default true) and :180-183 (bidirectional_boost_eligible)",
+      triggered: req.isReply,
+    },
+    {
+      id: "post-age-cutoff",
+      severity: "critical",
+      title: "Past 48 hours old, a post stops being eligible for For You ranking at all",
+      detail: `You told us this post is ${(req.postedHoursAgo ?? 0).toFixed(
+        0
+      )}h old. AgeFilter drops any candidate older than 48h before scoring even starts — not a downrank, a hard exclusion from recommendation candidates entirely. It can still be seen by followers scrolling their following feed or your profile, just not surfaced through For You ranking anymore.`,
+      source: "home-mixer/candidate_pipeline/phoenix_candidate_pipeline.rs:347; home-mixer/params/config.rs:36 (MAX_POST_AGE = 48h)",
+      triggered: (req.postedHoursAgo ?? 0) > 48,
+    },
   ];
 
   if (req.authorFollowers !== undefined) {
     const ageHours = req.postedHoursAgo ?? 0;
     const eligible =
-      req.authorFollowers <= COLD_START_FOLLOWER_CAP && ageHours <= COLD_START_MAX_AGE_HOURS;
+      req.authorFollowers <= COLD_START_FOLLOWER_CAP &&
+      ageHours <= COLD_START_MAX_AGE_HOURS &&
+      !req.isReply;
     risks.push({
       id: "cold-start-boost",
       severity: "info",
@@ -684,11 +712,13 @@ function buildRisks(f: FeatureReport, req: AnalyzeRequest): RiskFlag[] {
           ).toFixed(
             0
           )}% of that viewer's scored candidates on its own merits; only then does the boost lift its score up to match whatever's currently sitting around rank 15. And it only applies while the post is still under ${COLD_START_IMPRESSION_THRESHOLD.toLocaleString()} total views — once it crosses that, cold-start stops touching it. This is separate from, and on top of, the BESC Score above.`
-        : `Cold-start boosting only kicks in under ${COLD_START_FOLLOWER_CAP.toLocaleString()} followers and within a ${COLD_START_MAX_AGE_HOURS}h posting window. At ${req.authorFollowers.toLocaleString()} followers${
-            ageHours > COLD_START_MAX_AGE_HOURS ? ` and ${ageHours.toFixed(0)}h old` : ""
-          }, this post doesn't currently qualify.`,
+        : req.isReply
+          ? `Cold-start boosting only ever applies to original posts — cold_start_base_eligible() requires the candidate to not itself be a reply or repost. This one's a reply, so it's excluded regardless of follower count or age.`
+          : `Cold-start boosting only kicks in under ${COLD_START_FOLLOWER_CAP.toLocaleString()} followers and within a ${COLD_START_MAX_AGE_HOURS}h posting window. At ${req.authorFollowers.toLocaleString()} followers${
+              ageHours > COLD_START_MAX_AGE_HOURS ? ` and ${ageHours.toFixed(0)}h old` : ""
+            }, this post doesn't currently qualify.`,
       source:
-        "home-mixer/scorers/author_cold_start.rs:86-91,130-192; home-mixer/params/param.rs (ColdStartFollowerCap=1000, ColdStartMaxPostAgeSecs=86400, ColdStartImpressionThreshold=1000, LowImpressionsMaxPositionRatio=0.85, ColdStartSlotMin/Max=15/16)",
+        "home-mixer/scorers/author_cold_start.rs:86-91,130-192 (cold_start_base_eligible requires in_reply_to_tweet_id/retweeted_tweet_id both None); home-mixer/params/param.rs (ColdStartFollowerCap=1000, ColdStartMaxPostAgeSecs=86400, ColdStartImpressionThreshold=1000, LowImpressionsMaxPositionRatio=0.85, ColdStartSlotMin/Max=15/16)",
       triggered: eligible,
     });
   }
@@ -847,12 +877,20 @@ function buildTips(f: FeatureReport, req: AnalyzeRequest, risks: RiskFlag[]): Ti
     });
   }
 
-  if (req.isReplyToMutual) {
+  if (!req.isReply && req.hasMutualFollowAudience) {
     tips.push({
-      id: "mutual-reply-bonus",
-      title: "Good move: replying inside a mutual-follow thread",
+      id: "mutual-original-post-bonus",
+      title: "Original post to a mutual-follow audience: +15.0 reply-weight bonus applies",
       detail:
-        "Original-post replies between two accounts that follow each other get a +15.0 boost on top of the base 5.0 reply weight, the single largest situational boost in the model.",
+        "Verified in ranking_scorer.rs: bidirectional_boost_eligible() requires the post to NOT be a reply or repost. This bonus rewards original content shown to people who follow you back, not replies — it never applies to a reply, even one addressed to a mutual.",
+      impact: "low",
+    });
+  } else if (req.isReply && req.hasMutualFollowAudience) {
+    tips.push({
+      id: "mutual-reply-no-bonus",
+      title: "This bonus doesn't apply here — it's reply-only excluded",
+      detail:
+        "The +15.0 bidirectional mutual-follow bonus only ever applies to original posts, never to replies, regardless of who they're addressed to. If reach matters more than replying to this specific thread, an original post to the same audience would pick up this bonus and this reply won't.",
       impact: "low",
     });
   }

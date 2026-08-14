@@ -4,7 +4,11 @@ export interface AnalyzeRequest {
   text: string;
   mediaType: MediaType;
   link: string;
-  isReplyToMutual: boolean;
+  /** Is this draft itself a reply to someone else's post (not a quote post)? */
+  isReply: boolean;
+  /** Does a meaningful share of your followers also follow you back? Only
+   * matters when isReply is false — see WEIGHTS.bidirectionalReplyBoost. */
+  hasMutualFollowAudience: boolean;
   recentPostsCount: number;
   nsfw: boolean;
   /** Your follower count, if known — drives the cold-start boost check. Omit if unknown. */
