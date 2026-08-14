@@ -56,7 +56,7 @@ export default function SignalBreakdown({ actions }: { actions: ActionRow[] }) {
                   }`}
                 />
               </div>
-              <div className="pointer-events-none absolute left-0 top-full z-10 mt-1 w-max max-w-xs rounded-lg border border-white/10 bg-panel px-2.5 py-1.5 text-[11px] text-white/60 opacity-0 shadow-xl transition-opacity duration-150 group-hover:opacity-100">
+              <div className="pointer-events-none absolute left-0 top-full z-10 mt-1 w-max max-w-[min(20rem,80vw)] rounded-lg border border-white/10 bg-panel px-2.5 py-1.5 text-[11px] text-white/60 opacity-0 shadow-xl transition-opacity duration-150 group-hover:opacity-100">
                 weight {a.weight.toFixed(2)} × P {(a.probability * 100).toFixed(0)}%
                 <br />
                 <span className="text-white/40">{a.weightSource}</span>

@@ -6,24 +6,24 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        void: "#05060a",
-        surface: "#0b0d14",
-        panel: "#11131c",
-        line: "#1f2230",
+        void: "#050403",
+        surface: "#0b0906",
+        panel: "#131009",
+        line: "#241d10",
         besc: {
-          50: "#eefcf6",
-          100: "#d3f8e7",
-          200: "#a3efd0",
-          300: "#68e0b4",
-          400: "#33cb98",
-          500: "#14b381",
-          600: "#0a9169",
-          700: "#0a7456",
-          800: "#0c5c46",
-          900: "#0c4b3b",
+          50: "#fbf3e2",
+          100: "#f6e6bd",
+          200: "#f1df92",
+          300: "#e7bb7c",
+          400: "#d9ae68",
+          500: "#c2924f",
+          600: "#ad8345",
+          700: "#a06e36",
+          800: "#7a5527",
+          900: "#56391a",
         },
-        volt: "#c8ff4d",
-        signal: "#7c5cff",
+        volt: "#f6e2a1",
+        signal: "#b3823f",
         danger: "#ff5c7c",
         warn: "#ffb547",
       },
@@ -33,12 +33,14 @@ const config: Config = {
         mono: ["var(--font-mono)", "monospace"],
       },
       boxShadow: {
-        glow: "0 0 40px -10px rgba(20, 179, 129, 0.5)",
-        "glow-lg": "0 0 80px -20px rgba(124, 92, 255, 0.45)",
+        glow: "0 0 40px -10px rgba(194, 146, 79, 0.55)",
+        "glow-lg": "0 0 80px -20px rgba(241, 223, 146, 0.4)",
       },
       backgroundImage: {
         "grid-fade":
-          "linear-gradient(to bottom, transparent, rgba(5,6,10,1)), linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)",
+          "linear-gradient(to bottom, transparent, rgba(5,4,3,1)), linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)",
+        "gold-sheen":
+          "linear-gradient(115deg, #a06e36 0%, #f1df92 28%, #fbf3e2 42%, #d9ae68 58%, #ad8345 78%, #f1df92 100%)",
       },
       keyframes: {
         aurora: {

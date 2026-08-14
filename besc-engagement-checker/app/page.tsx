@@ -1,14 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
-import { Zap, Github, ArrowRight } from "lucide-react";
+import { Github, ArrowRight } from "lucide-react";
 import Background from "@/components/Background";
 import Composer from "@/components/Composer";
 import ScoreGauge from "@/components/ScoreGauge";
 import SignalBreakdown from "@/components/SignalBreakdown";
 import RiskPanel from "@/components/RiskPanel";
 import TipsPanel from "@/components/TipsPanel";
+import SocialLinks from "@/components/SocialLinks";
 import type { ScoreResult } from "@/lib/types";
 
 export default function Home() {
@@ -21,22 +23,26 @@ export default function Home() {
 
       <header className="mx-auto flex max-w-7xl items-center justify-between px-5 py-6 sm:px-8">
         <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-besc-400 to-besc-600 shadow-glow">
-            <Zap className="h-[18px] w-[18px] text-void" strokeWidth={2.5} />
+          <div className="relative h-9 w-9 shrink-0 drop-shadow-[0_0_14px_rgba(194,146,79,0.45)]">
+            <Image src="/besc-logo.png" alt="BESC" fill sizes="36px" className="object-contain" priority />
           </div>
           <span className="font-display text-[15px] font-bold tracking-tight">
-            BESC <span className="text-white/40 font-medium">Engagement Checker</span>
+            <span className="text-gold">BESC</span>{" "}
+            <span className="text-white/40 font-medium">Engagement Checker</span>
           </span>
         </div>
-        <a
-          href="https://github.com/BESCLLC/x-algo-BESC-twitter-engagement-"
-          target="_blank"
-          rel="noreferrer"
-          className="hidden items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3.5 py-1.5 text-xs font-medium text-white/50 transition-colors hover:text-white/80 sm:flex"
-        >
-          <Github className="h-3.5 w-3.5" />
-          View the algorithm
-        </a>
+        <div className="flex items-center gap-2">
+          <a
+            href="https://github.com/BESCLLC/x-algo-BESC-twitter-engagement-"
+            target="_blank"
+            rel="noreferrer"
+            className="hidden items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3.5 py-1.5 text-xs font-medium text-white/50 transition-colors hover:text-white/80 sm:flex"
+          >
+            <Github className="h-3.5 w-3.5" />
+            View the algorithm
+          </a>
+          <SocialLinks />
+        </div>
       </header>
 
       <section className="mx-auto max-w-7xl px-5 pb-6 pt-4 sm:px-8 sm:pb-10">
@@ -49,7 +55,8 @@ export default function Home() {
             style={{ animationFillMode: "backwards" }}
           >
             Score your post before
-            <br className="hidden sm:block" /> the algorithm scores it.
+            <br className="hidden sm:block" /> the{" "}
+            <span className="text-gold">algorithm</span> scores it.
           </h1>
           <p
             className="animate-rise max-w-2xl text-balance text-[15px] leading-relaxed text-white/50 sm:text-base [animation-delay:120ms]"
@@ -148,10 +155,16 @@ export default function Home() {
         </div>
       </section>
 
-      <footer className="mx-auto max-w-7xl px-5 pb-10 pt-4 text-center text-xs text-white/25 sm:px-8">
-        Built by BESC · weights sourced from{" "}
-        <code className="font-mono text-white/35">home-mixer/params/param.rs</code> ·
-        not affiliated with X Corp.
+      <footer className="mx-auto flex max-w-7xl flex-col items-center gap-5 px-5 pb-14 pt-6 sm:px-8">
+        <div className="relative h-10 w-10 opacity-90">
+          <Image src="/besc-logo.png" alt="BESC" fill sizes="40px" className="object-contain" />
+        </div>
+        <SocialLinks variant="labeled" />
+        <p className="max-w-xl text-balance text-center text-xs text-white/25">
+          Built by <span className="text-besc-400/80">BESC</span> · weights sourced from{" "}
+          <code className="font-mono text-white/35">home-mixer/params/param.rs</code> · not
+          affiliated with X Corp.
+        </p>
       </footer>
     </main>
   );
