@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-line;
+  }
+  html {
+    color-scheme: dark;
+  }
+  body {
+    background: #05060a;
+  }
+  ::selection {
+    background: rgba(51, 203, 152, 0.28);
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #232636;
+    border-radius: 999px;
+    border: 2px solid #05060a;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #2f3346;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply relative rounded-3xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-xl;
+  }
+
+  .glass-inset {
+    @apply rounded-2xl border border-white/[0.06] bg-black/20;
+  }
+
+  .noise-overlay {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+    opacity: 0.05;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .mask-fade-b {
+    mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+  }
+}
